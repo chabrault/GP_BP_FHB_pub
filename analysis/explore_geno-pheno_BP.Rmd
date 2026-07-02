@@ -1,0 +1,662 @@
+---
+title: "Explore data from several breeding programs"
+author: Charlotte Brault
+output: html_document
+date: '`r format(Sys.time(), "%d %B, %Y")`'
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,warning = FALSE, message = FALSE)
+```
+
+# Libraries
+
+```{r load libraries}
+suppressPackageStartupMessages(library(here)) # root directory
+suppressPackageStartupMessages(library(data.table)) # load data
+suppressPackageStartupMessages(library(apercu)) # ap
+suppressPackageStartupMessages(library(dplyr)) # formatting
+suppressPackageStartupMessages(library(knitr)) # table display
+suppressPackageStartupMessages(library(gtsummary)) # data summary
+suppressPackageStartupMessages(library(ggplot2)) # plot
+suppressPackageStartupMessages(library(janitor)) # formatting
+suppressPackageStartupMessages(library(purrr)) # handle lists
+suppressPackageStartupMessages(library(gt)) # render table
+suppressPackageStartupMessages(library(gtExtras)) # render table
+suppressPackageStartupMessages(library(factoextra)) # pca
+suppressPackageStartupMessages(library(ade4)) # pca
+suppressPackageStartupMessages(library(plotly)) # interactive plot
+suppressPackageStartupMessages(library(ggvenn)) # venn diagram plot
+suppressPackageStartupMessages(library(ggridges)) # distrib
+suppressPackageStartupMessages(library(GGally)) # ggpairs
+suppressPackageStartupMessages(library(ggbeeswarm)) # plot point distrib
+suppressPackageStartupMessages(library(rnaturalearth)) # get map
+suppressPackageStartupMessages(library(sf)) # plot map
+suppressPackageStartupMessages(library(ggrepel)) # plot names
+suppressPackageStartupMessages(library(ggpp)) # plot names
+suppressPackageStartupMessages(library(bigstatsr)) # plot theme
+suppressPackageStartupMessages(library(patchwork)) # combine plots
+library(HRSWGS)
+```
+
+
+# Set up root directory
+
+```{r current dir}
+here::i_am("analysis/explore_geno-pheno_BP.Rmd")
+```
+
+
+This R chunk is used to assess how much time it takes to execute the R code in this document until the end:
+
+```{r time_0}
+t0 <- proc.time()
+```
+
+```{r}
+trait.pal <- c(
+  "DIS"="#F99D53FF",
+  "VSK"="#4F5791FF",
+  "DON"="#D40F7DFF"
+)
+```
+
+# Load combined data
+
+Generated in `HRSW_BP_BP/analysis/format_inputs_FHB.Rmd`.
+
+```{r}
+p2f.input <- here("data","inputs_GP_BP_FHB.rds")
+file.mtime(p2f.input) #"2026-03-06 13:37:01 CST"
+tools::md5sum(p2f.input) # 89e2797da1f8d74bded5113a22a07bc2
+dat <- readRDS(p2f.input)
+## unlist elements and add them to the environment
+list2env(dat, globalenv())
+pheno <- gv
+table(pheno$BP)
+(BPs <- unique(pheno$BP))
+(traits <- colnames(pheno)[!colnames(pheno) %in% c("GID","BP")])
+GRM <- rrBLUP::A.mat(geno-1)
+gid.nur <- pheno$GID[pheno$BP %in% "NUR"]
+print_table(fitSummary)
+```
+
+
+## Genotype information for nursery genotypes
+
+```{r load-nur-info}
+#nur.info <- fread(here("data","genotype_information_URN_URSN_URNFHB.tsv"))
+dim(nur.info)
+table(nur.info$SOURCE)
+gid.nur <- pheno$GID[pheno$BP %in% "NUR"] ## 881
+setdiff(gid.nur, nur.info$GID)
+nur.info$SOURCE <- forcats::fct_lump_min(nur.info$SOURCE, min=50, other_level = "OTHER")
+table(nur.info$SOURCE)
+pheno <- pheno |> 
+  left_join(nur.info |> dplyr::select(GID,SOURCE), by="GID")
+head(pheno)
+
+## add breeding program for the nursery genotypes in the phenotype table
+pheno$NUR.BP <- ifelse(pheno$BP=="NUR", paste0("NUR-",pheno$SOURCE), pheno$BP)
+pheno <- pheno |> dplyr::select(-SOURCE) |> 
+  relocate(NUR.BP, .after=BP)
+table(pheno$NUR.BP)
+```
+
+
+
+## Location GPS coordinates
+
+```{r}
+trial.coord <- fread(here("data","BP_TPE_LOC.csv")) 
+## filter on the locations used for scab screening
+
+```
+
+
+
+# Number of genotypes
+
+```{r}
+table(pheno$NUR.BP)
+ap(geno.sc)
+
+# geno.info <- data.frame(GID=colnames(geno.sc)) |> 
+#   left_join(pheno |> select(GID,NUR.BP), by="GID")
+tbl <- nur.info |> group_by(SOURCE) |> 
+  summarise(n_geno=n()) |> arrange(SOURCE)
+tbl |> gt()
+# |>
+#   gt::gtsave(
+#     here("output","figures","number_genotypes_by-BP.png"))
+```
+
+# Summary table by breeding program
+
+```{r summ_table, warning=FALSE,attr.message=F}
+traits.sel <- traits <- c("DIS","VSK","DON")
+
+tbl <- tbl_summary(pheno, by="BP",
+                   include=all_of(traits.sel),
+                   type = all_continuous() ~ "continuous2",
+                   missing="no",
+                   statistic = all_continuous() ~ 
+                     c(
+                       "{mean} ({sd})",
+                       #"{min}, {max}",
+                       "{N_nonmiss}"))|> 
+  gtsummary::add_p() |> add_n()
+tbl
+# gtsave(tbl,
+#   here("output","figures","summary_pheno_by-BP.html")
+# )
+tbl |> as_gt() |>
+  gt::gtsave(
+    here("output","figures","summary_pheno_by-BP.png")
+  )
+```
+
+
+# Plot
+
+## Genetic structure
+
+PCA analysis based on the GRM imputed by the mean
+
+```{r geno_struct}
+## build genomic relationship matrix
+dim(GRM)
+ap(GRM)
+#superheat::superheat(GRM, pretty.order.rows=F, pretty.order.cols=F)
+
+## run PCA analysis
+res.pca.geno <- ade4::dudi.pca(df=GRM, nf=2, scannf = FALSE)
+factoextra::fviz_eig(res.pca.geno,addlabels = TRUE)
+
+df.bp <- pheno |> dplyr::select(GID,NUR.BP,BP) |> distinct()
+
+df.col <- df.bp[match(colnames(GRM), df.bp$GID),]
+head(df.col)
+
+
+## color for population (trial or nursery)
+cols <- c("MN"="#7a0019","ND"="#2E8B57","SD"="#3A5FCD","MT"="#bd9b04",
+          "NUR-NA"="snow3","NUR-AAFC-CA"="#bf8ea1","NUR-PRIVATE"="#8A42C9",
+          "NUR-OTHER"="grey50","NUR"="grey50",
+          "NUR-MN"="#ed694e","NUR-ND"="#a1d99b","NUR-SD"="#9ecae1",
+          "NUR-MT"="#f7e084")
+# factoextra::fviz_pca_ind(res.pca,geom="point",addEllipses = FALSE, col.ind="white")+
+#   geom_point(aes(color=df.col$NUR.BP), size=2, alpha=0.8)+
+#   theme_bw(base_size=13)+
+#   scale_color_manual(values=cols, name="Breeding program")+
+#   ggtitle("Genomic PCA all") +
+#   theme(legend.position="bottom")
+#geom_label_repel(data=res.pca$li[checks,],mapping=aes(x=Axis1, y=Axis2, label=checks), min.segment.length = 0)
+var1 <- round(res.pca.geno$eig[1]/sum(res.pca.geno$eig)*100,1)
+var2 <- round(res.pca.geno$eig[2]/sum(res.pca.geno$eig)*100,1)
+
+## interactive plot
+df.pca <- res.pca.geno$li
+df.pca$GID <- rownames(df.pca)
+df.pca <- merge(df.col,df.pca)
+
+ggplot(df.pca, aes(x=Axis1, y=Axis2, label=GID,color=NUR.BP))+
+  geom_point(size=1.5,alpha=0.8)+
+  bigstatsr::theme_bigstatsr(size.rel=0.8)+
+  labs(x=paste0("Axis 1 (",round(res.pca.geno$eig[1]/sum(res.pca.geno$eig)*100,1),"%)"),
+       y=paste0("Axis 2 (",round(res.pca.geno$eig[2]/sum(res.pca.geno$eig)*100,1),"%)"))+
+  scale_color_manual(values=cols, name="Breeding program")+
+  theme(legend.position="bottom",
+        panel.grid = element_blank())
+
+# ## start device
+# png(here("output","figures",paste0("PCA_inds_geno_all-BPs_interactive.png")),
+#     width=8, height=6, res=150)
+# plotly::ggplotly(p)
+# dev.off()
+
+
+df.pca <- df.pca |> 
+  mutate(isNUR = ifelse(BP %in% "NUR", "NUR","BP"),
+         NUR.BP = factor(NUR.BP)) |> 
+  mutate(NUR.BP=forcats::fct_relevel(NUR.BP, "SD","ND"))
+levels(df.pca$NUR.BP)
+table(df.pca$isNUR)
+
+p <- df.pca |> 
+  mutate(isNUR=recode(isNUR, "NUR"="Nursery", "BP"="Breeding program")) |>
+  ggplot( aes(x=Axis1, y=Axis2, label=GID,color=NUR.BP))+
+  facet_wrap(~isNUR) +
+  gghighlight::gghighlight()+
+  geom_point(size=1.5,alpha=0.8)+
+  scale_color_manual(values=cols, name="Breeding program")+
+  bigstatsr::theme_bigstatsr(size.rel=0.9)+
+  guides(color=guide_legend(override.aes=list(alpha=1,size=3)))+
+  labs(x=paste0("Axis 1 (",var1,"%)"),
+       y=paste0("Axis 2 (",var2,"%)"))+
+  #ggtitle(paste0("Genomic PCA - Breeding program"))+
+  theme(legend.position="bottom",
+        legend.title.position="top",
+        panel.grid = element_blank(),
+        strip.background=element_rect(color="grey85"), 
+        panel.border = element_rect(color="grey85"))
+#esquisse::ggplot_to_ppt(gg="p")
+p
+ggsave(filename = here("output","figures",paste0("PCA_inds_geno_NUR-all-BPs.png")),
+       width=8, height=6, scale=0.85)
+#rm(GRM)
+```
+
+Plot separately for breeding programs and for nursery
+
+```{r}
+pBP <- df.pca |> filter(isNUR %in% "BP") |> 
+  ggplot( aes(x=Axis1, y=Axis2, label=GID,color=NUR.BP))+
+  geom_point(size=1.2,alpha=0.5)+
+  scale_color_manual(values=cols, name="Breeding program")+
+  bigstatsr::theme_bigstatsr(size.rel=0.85)+
+  ## keep same scales
+  scale_x_continuous(limits=c(min(df.pca$Axis1), max(df.pca$Axis1)))+
+  scale_y_continuous(limits=c(min(df.pca$Axis2), max(df.pca$Axis2)))+
+  guides(color=guide_legend(override.aes=list(alpha=1,size=3), nrow=3))+
+  labs(x=paste0("Axis 1 (",var1,"%)"),
+       y=paste0("Axis 2 (",var2,"%)"),
+       title="Breeding Program Entries")+
+  #ggtitle(paste0("Genomic PCA - Nursery genotypes"))+
+  theme(legend.position="bottom",
+        legend.title.position="top",
+        plot.title=element_text(size=14))
+
+
+pNUR <- df.pca |> filter(isNUR %in% "NUR") |>
+  ggplot( aes(x=Axis1, y=Axis2, label=GID,color=NUR.BP))+
+  geom_point(size=1.2,alpha=0.6)+
+  ## keep same scales
+  scale_x_continuous(limits=c(min(df.pca$Axis1), max(df.pca$Axis1)))+
+  scale_y_continuous(limits=c(min(df.pca$Axis2), max(df.pca$Axis2)))+
+  scale_color_manual(values=cols, name="Nursery source")+
+  bigstatsr::theme_bigstatsr(size.rel=0.85)+
+  guides(color=guide_legend(override.aes=list(alpha=1,size=3), nrow=3))+
+  labs(x=paste0("Axis 1 (",var1,"%)"),
+       y=paste0("Axis 2 (",var2,"%)"),
+       title="Nursery Entries")+
+  #ggtitle(paste0("Genomic PCA - Nursery genotypes"))+
+  theme(legend.position="bottom",
+        legend.title.position="top",
+        axis.title.y=element_blank(),
+        axis.text.y=element_blank(),
+        plot.title=element_text(size=14))
+  
+
+pPCA = pBP+pNUR + plot_annotation(tag_levels = "A") &
+  theme(plot.tag = element_text(size=15, face="bold"),
+        legend.position="bottom",
+        legend.title.position="top")
+pPCA
+```
+
+
+## Phenotype distribution by trait
+
+```{r plot_distrib, warning=F}
+for(tr in traits){
+  #tr="YLD"
+  plot(ggplot(pheno, aes(x=BP, y=.data[[tr]]))+
+         ggbeeswarm::geom_quasirandom(alpha=0.2)+
+         stat_summary()+
+         bigstatsr::theme_bigstatsr(size.rel=0.8))
+}
+```
+
+
+Distribution for URN/URSN
+
+```{r}
+pheno.long <- pheno |> 
+  filter(BP %in% "NUR", NUR.BP %in% c("NUR-SD","NUR-ND","NUR-MT","NUR-MN")) |> 
+  tidyr::pivot_longer(cols=all_of(traits), names_to = "trait", values_to = "value") |> 
+  mutate(trait=factor(trait, levels=traits))
+distri.nur <- ggplot(pheno.long, aes(x=value, y=NUR.BP,  fill=NUR.BP, color=NUR.BP))+
+  #ggdist::stat_eye(position = "dodge", size=1) +
+  #ggdist::stat_dots(position = "dodge", scale=0.5, alpha=0.6)+
+  geom_density_ridges2(alpha=0.8,linewidth=0.3, color=NA,scale = 1,
+                       quantile_lines = TRUE, quantiles = 2,rel_min_height =0.01,
+                       vline_width=0.7, vline_color = "black")+
+  facet_wrap(~trait, scales="free_x")+
+  #theme_minimal(base_size=14)+
+  bigstatsr::theme_bigstatsr(size.rel=0.8)+
+  labs(x="BLUP value",y="URN FHB + URSN genotype source")+
+  scale_color_manual(values=cols, name="Breeding program")+
+  scale_fill_manual(values=cols, name="Breeding program")+
+  #ggtitle("Phenotypic distribution by trait and BP")+
+  geom_rug(linewidth=0.2,length = unit(0.05, "npc"),alpha=0.7)+
+  theme(legend.position="none",
+        panel.border = element_rect(fill="white", color="grey60", linewidth=0.5),
+        strip.background = element_rect(fill="white", color="grey60", linewidth=0.2))
+distri.nur
+ggsave(here("output","figures","Pheno-distrib_by-trait_and-NUR-BP.png"),
+       width=9, height=6, scale=0.8)
+```
+
+
+## Wheat class effect
+
+ND distribution by wheat class
+```{r}
+phenoND <- pheno |> filter(BP %in% "ND")
+phenoND$CLASS <- NA
+phenoND$CLASS[grep("^NDR|^NDHRS", phenoND$GID)] <- "RED"
+phenoND$CLASS[grep("^NDW",phenoND$GID)] <- "WHITE"
+phenoND$GID[is.na(phenoND$CLASS)]
+phenoND$CLASS[is.na(phenoND$CLASS)] <- "CHECKS"
+table(phenoND$CLASS)
+phenoND.long <- phenoND |> 
+  tidyr::pivot_longer(cols=all_of(traits), names_to = "trait", values_to = "value") 
+```
+
+
+Phenotypic distribution plot
+```{r}
+phenoND.long |> filter(CLASS %in% c("RED","WHITE"), trait %in% "DIS") |>
+  ggplot( aes(x=value, y=CLASS, fill=CLASS, color=CLASS))+
+  geom_density_ridges2(alpha=0.8,linewidth=0, color=NA,scale = 1,
+                       quantile_lines = TRUE, quantiles = 2,rel_min_height =0.01,
+                       vline_width=0.7, vline_color = "black")+
+  facet_wrap(~trait, scales="free_x")+
+  bigstatsr::theme_bigstatsr(size.rel=0.8)+
+  labs(x="BLUP value",y="Wheat class")+
+  scale_color_manual(values=c("RED"="#D40F7DFF","WHITE"="wheat"), name="Wheat class")+
+  scale_fill_manual(values=c("RED"="#D40F7DFF","WHITE"="wheat"),name="Wheat class")+
+  geom_rug(linewidth=0.2,length = unit(0.05, "npc"),alpha=0.7)+
+  theme(legend.position="none",
+        panel.border = element_rect(fill="white", color="grey60", linewidth=0.5),
+        strip.background = element_rect(fill="white", color="grey60", linewidth=0.))
+ggsave(here("output","figures","Pheno-distrib_ND_by-wheat-class.png"),
+       width=6, height=4, scale=0.85)
+
+## statistical difference
+phenoND.long |> filter(CLASS %in% c("RED","WHITE"), trait %in% "DIS") |>
+  rstatix::wilcox_test(value ~ CLASS) |> 
+  rstatix::add_significance() 
+```
+
+
+
+
+Genetic structure plot
+```{r}
+df.pca.ND <- merge(df.pca, phenoND |> dplyr::select(GID,CLASS), by="GID", all=F)
+ggplot(df.pca.ND, aes(x=Axis1, y=Axis2, color=CLASS))+
+  geom_point()+
+  scale_color_manual(values=c("RED"="#D40F7DFF","WHITE"="wheat","CHECKS"="grey50"), name="Wheat class")+
+  geom_label_repel(data=df.pca.ND[df.pca.ND$CLASS %in% "CHECKS",], mapping=aes(label=GID), 
+                   size=3, min.segment.length = 0)+
+  bigstatsr::theme_bigstatsr(size.rel=0.8)+
+  labs(x=paste0("Axis 1 (",var1,"%)"),
+       y=paste0("Axis 2 (",var2,"%)"))+
+  theme(legend.position="bottom",
+        legend.title.position="top",
+        panel.grid = element_blank())
+ggsave(here("output","figures","PCA_inds_geno_ND_by-wheat-class_v2.png"),
+       width=6, height=4, scale=0.85)
+```
+
+
+
+
+
+## Phenotypic structure
+
+```{r}
+dat.pca <- pheno |> dplyr::select(all_of(c("GID",traits))) 
+## remove rows with too little observations
+rs <- rowSums(is.na(dat.pca)) ; idx <- which(rs >= 2)
+dat.pca <- dat.pca[-idx,]
+
+dat.pca <- dat.pca |> mutate(across(traits, \(x) 
+                                    metan::replace_na(x, replacement=mean(x, na.rm=T)))) |> 
+  metan::column_to_rownames("GID") |> as.matrix()
+res.pca <- ade4::dudi.pca(df=dat.pca, nf=2, scannf = FALSE)
+
+factoextra::fviz_eig(res.pca,addlabels = TRUE)
+
+df.col <- df.bp[match(rownames(dat.pca), df.bp$GID),]
+
+factoextra::fviz_pca_biplot(res.pca,geom="point",
+                            addEllipses = FALSE, col.ind="white")+
+  geom_point(aes(color=df.col$BP), size=2, alpha=0.8)+
+  theme_bw(base_size=13)+
+  scale_color_manual(values=cols, name="Breeding program")+
+  ggtitle("Phenotypic PCA all") + theme(legend.position="bottom")
+ggsave(here("output","figures",paste0("PCA_inds_pheno_all-BPs.png")),
+       width=7, height=6, scale=0.85)
+```
+
+## Figure for manuscript
+
+Combine genetic (p) and phenotypic structure
+```{r combine_plots, fig.height=7}
+## load saved figure from HRSWGS_BP
+fig <- readRDS(here("output","figures","plot_distrib_BP.rds"))
+
+# p1 <- p + theme_bigstatsr(size=0.7) + 
+#   guides(color=guide_legend(nrow=2))+ 
+#   theme(legend.position="bottom")
+p2 <- fig + ylab("Population")+
+  scale_y_discrete(labels=c("URSN_URN-FHB"="URSN \n+ URN"))+
+  theme_bigstatsr(size=0.7) +
+  theme(legend.position="none",axis.text.x=element_text(size=rel(0.8)))
+p3 <- distri.nur + theme_bigstatsr(size=0.7) + theme(legend.position="none")
+pall <- pPCA/(p2+p3) + plot_layout(heights=c(1,1), widths=c(1.1,1)) + 
+  plot_annotation(tag_levels = "A") &
+  theme(plot.tag = element_text(size=15, face="bold")) & 
+  theme(strip.background = element_rect(fill="grey85", color="grey85"),
+        panel.border = element_rect(color="grey85"),
+        axis.text.x=element_text(size=rel(0.9)))
+pall
+ggsave(here("output","figures",
+            "combined-plot_genetic-structure_phenotypic-distrib_v2.png"), 
+       height=8, width=11, scale=0.9)
+#esquisse::ggplot_to_ppt(gg="pall")
+```
+
+
+# Trial information
+
+## Load experimental design
+Experimental design info formatted in `transfer_combine_geno-pheno_BP.Rmd`.`
+
+```{r}
+#expeDesign <- fread(here("data","pheno","expeDesign_combined-BPs.tsv"), data.table=F)
+dim(expeDesign)
+head(expeDesign)
+```
+
+
+## Experimental design by BP
+
+```{r}
+expeDesign |> 
+  filter(!BP %in% c("URN","URSN_URN-FHB")) |> 
+  ggplot(aes(y=LOC, x=nGeno, fill=as.factor(YEAR)))+
+  facet_wrap(~BP, scales="free_y", labeller = "label_both")+
+  #geom_point(size=2, alpha=0.7, position=position_dodge(width=0.7))+
+  geom_bar(stat="identity", position="dodge",color="white")+
+  bigstatsr::theme_bigstatsr(size.rel=0.8)+
+  scale_fill_viridis_d(name="Year", option="C")+
+  guides(fill=guide_legend(nrow=2))+
+  scale_x_continuous(expand = expansion(mult = c(0, 0.1)))+
+  labs(y="Location", x="Number of genotypes")+
+  theme(legend.position="bottom",
+        legend.title.position="top",
+        strip.background=element_rect(color=NA), 
+        panel.border = element_rect(color="grey85"),
+        panel.grid=element_blank()
+        #axis.text.y=element_blank()
+  )
+ggsave(here("output","figures","Expe-design_nTraits-by-LOC-year_by-BP.png"),
+       width=9, height=7, scale=0.85)
+
+## average ngeno by trial
+expeDesign |> group_by(BP) |> 
+  summarize(mean_nGeno_trial=round(mean(nGeno),1),
+            sd_nGeno_trial=mean(sd(nGeno),1),
+            n_trials=n(),
+            n_years=length(unique(YEAR)),
+            n_locs=length(unique(LOC))) |> 
+  print_table()
+
+
+```
+
+Study URN and URSN experimental design
+
+```{r}
+expeDesign |> 
+  # filter(BP %in% c("URN","URSN_URN-FHB")) |> 
+  group_by(BP,YEAR) |>
+  summarize(nGeno=mean(nGeno),
+            nLoc=length(unique(LOC))) |>
+  mutate(YEAR=as.numeric(YEAR)) |> 
+  ggplot(aes(y=nGeno, x=YEAR, color=nLoc))+
+  facet_wrap(~BP, scales="free")+
+  #scale_x_continuous(breaks =scales::breaks_pretty(n = 5))+
+  guides(color=guide_colorbar(barwidth=10,label.position="bottom"))+
+  geom_point(size=2, alpha=1, position=position_dodge(width=0.7))+
+  bigstatsr::theme_bigstatsr(size.rel=0.8)+
+  scale_color_viridis_c(name="Number of locations")+
+  labs(y="Average number of genotypes", x="Year")+
+  theme(legend.position="bottom",
+        legend.title.position="top",
+        axis.text.x = element_text(angle=-30, hjust=0, vjust=0.5),
+        plot.margin = margin(r = 0.7,unit = "cm"))
+ggsave(here("output","figures","Expe-design_nGeno-by-year_all-BPs.png"),
+       width=9, height=7, scale=0.85)
+```
+
+
+## Study fit information
+
+
+Heritability vs number of observations
+```{r}
+# fitSummary |> filter(trait %in% traits) |> 
+#   ggplot(aes(x=H2.Cullis, y=nobs, color=BP, size=nenvs))+
+#   facet_wrap(~trait, scales="free")+
+#   geom_point()
+
+fitSummary |> filter(trait %in% traits) |> 
+  ggplot(aes(y=H2.Cullis, x=nobs))+
+  geom_point(size=3, aes(shape=BP,color=trait), stroke=1.5)+
+  scale_color_manual(values=trait.pal, name="Trait")+
+  scale_shape_manual(values=c(0:3,8), name="Population")+
+  #paletteer::scale_color_paletteer_d("ggprism::stained_glass") +
+  theme_bigstatsr(size.rel=0.8)+
+  labs(x="Number of observations", y="Cullis Heritability")#+
+#geom_smooth(color="black", alpha=0.2, se=FALSE)
+#scale_y_continuous(limits=range(fitSummary$nobs))
+ggsave(here("output","figures","Fit-summary_H2-Cullis_vs-nobs_by-trait_BP.png"),
+       width=7, height=6, scale=0.85)
+
+
+fitSummary |> 
+  mutate(BP=forcats::fct_relevel(BP, c("NUR","SD","MT","MN","ND"))) |>
+  ggplot(aes(y=H2.Cullis, x=BP, color=trait, group=trait))+
+  geom_point(size=3)+
+  geom_line(alpha=0.6, linewidth=2)+
+  scale_color_manual(values=trait.pal, name="Trait")+
+  #paletteer::scale_color_paletteer_d("ggprism::stained_glass") +
+  theme_bigstatsr(size.rel=0.8)+
+  labs(x="Number of observations", y="Cullis Heritability")#+
+ggsave(here("output","figures","Fit-summary_H2-Cullis_by-trait_BP.png"),
+       width=7, height=6, scale=0.85)
+```
+
+
+Export table of fit information as supplementary table?
+
+```{r}
+tb4gt <- fitSummary |> 
+  mutate(varG=round(varG,1)) |> 
+  select(BP, trait, ngeno, nyears, nenvs, varG, H2.Cullis) |> 
+  arrange(BP, trait) |> group_by(trait) 
+gt.tab <- gt(tb4gt) 
+gt.tab
+
+gtsave(gt.tab,here("output","figures","Fit-summary_table_by-BP-trait.png"))
+
+gt::as_latex(gt.tab) |> 
+  writeLines(con = here("output","figures","Fit-summary_table_by-BP-trait.tex"))
+```
+
+
+# Plot map of locations
+
+
+```{r plot_map_locs, fig.width=7}
+trial.coord <- trial.coord |> filter(!Abbreviation %in% "SDN")
+cols <- c(cols, "URSN_URN-FHB"="grey40")
+
+expe_locs <- expeDesign |> group_by(BP, LOC, Location) |>
+  summarize(nTrials=n(), .groups="drop") |> 
+  mutate(Location=ifelse(LOC %in% "MRD", "Morden",Location)) |> 
+  left_join(trial.coord, by=c("Location"="Location")) 
+expe_locs |> summarize(sum(nTrials), .by=BP)
+locs_only <- expe_locs |> select(LOC,Longitude, Latitude) |> distinct()
+smallworld <- ne_states(country =c("united states of america","canada"),
+                        returnclass = "sf")
+
+## coordinates of US states and CAN provinces
+df_annot <- data.frame(
+  state = c("Minnesota", "South Dakota", "North Dakota", "Manitoba"),
+  long = c(-94.5, -100, -100, -100),
+  lat = c(47, 45, 47, 50.5)
+)
+
+xlims=c(-105,-92)
+ylims=c(43,51.5)
+
+smallworld %>%
+  st_transform(crs = "+proj=longlat") %>%
+  ggplot() +
+  
+  geom_sf(linewidth=1) + xlab("Longitude")+ylab("Latitude")+
+  theme_bigstatsr(size.rel=0.8)+
+  geom_point(data=expe_locs, aes(x=Longitude, y=Latitude, size=nTrials, color=BP), shape=1, stroke=1.5) +
+  # geom_label_s(data=locs_only, aes(x=Longitude, y=Latitude,label=LOC),
+  #             position = position_nudge_center(x=1,y=1, direction = "radial"), min.segment.length = 0,size=3,
+  #             segment.linewidth = 0.2,alpha.target ="box.fill",alpha=0.7,
+  #             fill="white",color.target = "all",color="black") +
+  geom_label_repel(data=locs_only, aes(x=Longitude, y=Latitude,label=LOC),
+                   direction="both",seed=45,
+                   min.segment.length=0.1, size=4,
+                   segment.color="black",alpha=0.7,label.padding=0.1,
+                   color="black",box.padding=0.1,force=0.5, 
+                   nudge_x=ifelse(locs_only$Longitude < -97, -0.4, 0.4),
+                   nudge_y=ifelse(locs_only$Latitude < 47, -0.4, 0.4),
+                   segment.size=0.5) +
+  annotate("text", x = df_annot$long, y = df_annot$lat, label = df_annot$state, color = "grey30", size = 4) +
+  scale_color_manual(values=cols, name="Breeding program")+
+  guides(size=guide_legend(title="Number of trials"),
+         color=guide_legend(nrow=2))+
+  coord_sf(xlim =xlims, ylim =ylims,crs = "+proj=longlat") +
+  theme(legend.position="bottom",
+        legend.title.position="top",
+        panel.grid = element_blank())
+ggsave(file=here("output", "figures","map_FHB-trials_nursery-BP.png"),
+       scale=0.8, width=7, height=7)
+```
+
+
+
+
+
+
+# Appendix
+
+```{r info}
+t1 <- proc.time(); t1 - t0
+print(sessionInfo(), locale=FALSE)
+```
+
+

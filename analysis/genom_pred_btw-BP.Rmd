@@ -1,0 +1,679 @@
+---
+title: "Apply genomic prediction across several breeding programs"
+author: Charlotte Brault
+output: html_document
+date: '`r format(Sys.time(), "%d %B, %Y")`'
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Libraries
+
+```{r load libraries}
+suppressPackageStartupMessages(library(here)) # root directory
+suppressPackageStartupMessages(library(data.table)) # load data
+suppressPackageStartupMessages(library(apercu)) # ap
+suppressPackageStartupMessages(library(dplyr)) # formatting
+suppressPackageStartupMessages(library(ggplot2)) # plot
+suppressPackageStartupMessages(library(janitor)) # formatting
+suppressPackageStartupMessages(library(purrr)) # handle lists
+suppressPackageStartupMessages(library(paletteer)) # color palette
+suppressPackageStartupMessages(library(bigstatsr)) # theme
+suppressPackageStartupMessages(library(ggpmisc)) # plot correlation
+
+#devtools::install_github("chabrault/HRSWGS")
+suppressPackageStartupMessages(library(HRSWGS)) ## custom functions
+```
+
+
+# Set up root directory
+
+```{r current dir}
+here::i_am("analysis/genom_pred_btw-BP.Rmd")
+```
+
+
+This R chunk is used to assess how much time it takes to execute the R code in this document until the end:
+
+```{r time_0}
+t0 <- proc.time()
+```
+
+
+
+
+# Load combined data
+Generated in `HRSW_BP_BP/analysis/format_inputs_FHB.Rmd`.
+
+```{r}
+p2f <- here("data","inputs_GP_BP_FHB.rds")
+file.mtime(p2f)
+tools::md5sum(p2f)
+dat <- readRDS(p2f)
+## unlist elements and add them to the environment
+list2env(dat, globalenv())
+pheno <- gv
+
+gid.int <- intersect(rownames(geno.sc), pheno$GID)
+stopifnot(all(nur.info$GID %in% rownames(geno.sc)))
+(BPs <- unique(pheno$BP))
+(traits <- colnames(pheno)[!colnames(pheno) %in% c("GID","BP")])
+GRM <- rrBLUP::A.mat(geno.sc)
+gid.nur <- pheno$GID[pheno$BP %in% "NUR"]
+#pheno.nur.TPE <- pheno.nur.TPE |> filter(GID %in% gid.int)
+
+map_dbl(pheno, n_distinct)
+dim(GRM)
+table(nur.info$NURSERY)
+```
+
+
+
+# Run genomic prediction
+
+## Definition of scenarios
+
+Genomic predictions scenarios:
+
+- **wBP**: within each BP, the nursery being considered as a breeding program here.
+
+- **acBP**: across each pair of BP, the nursery being considered as a breeding program here. The training set is composed of one breeding program. For example, NDSU -> SDSU, NDSU -> URN/URSN, ...We will extract more specifically how well the nursery is predicting the individual breeding program.
+
+- **acAllBP**: across BP but using data from all other breeding program in the training set: NDSU + SDSU + URN/URSN -> MSU for example.
+
+- **nursBP**: training using nursery genotypes from the breeding program to be predicted.
+
+For all the predictions, record the training/validation set size and the genetic relatedness.
+
+Questions:
+
+- Need a better control of training/validation set sizes with resampling?
+- Test training set optimization?
+- Study the contribution of parameters to the predictive ability?
+
+## Prediction parameters
+
+Cross-validation parameters:
+```{r CV_params}
+dim(pheno) ## 3270 x 11
+stopifnot(!any(duplicated(pheno$GID)))
+## params:
+ar <- "3k" ## genotypic array
+nreps <- 20 ## number of cross-validation repetitions
+nfolds <- 10 ## number of cross-validation folds
+nIter <- 15000 ## default 6000
+burnIn <- 2000 ## default 1000
+h <- 1 ## bandwidth parameter for RKHS
+
+nb.cores <- 12
+p2d.temp <- here::here("output","genom_pred","temp")
+#dir.create(p2d.temp)
+stopifnot(dir.exists(p2d.temp)) 
+write(p2d.temp,stderr())
+
+## list of possible GP method       
+method <- meth<- c("GBLUP")#"RKHS",
+suf <- ""
+```
+
+
+## wBP scenario
+
+wBP: within each BP, the nursery being considered as a breeding program here.
+```{r apply_gp_all_wBP}
+gp.wBP <- data.frame()
+rerun=F ## set to FALSE to avoid rerunning genomic prediction
+obs.pred <- list()
+for(bp in BPs){
+  write(paste(bp,"\n"),stderr())
+  for(meth in method){
+    
+    p2f.stats <- here("output","genom_pred",
+                      paste0(bp,"_GP_",meth,"_results_intraCV",suf,".tsv"))
+    if(!file.exists(p2f.stats) |rerun){
+      #write(paste(meth,"\n"),stderr())
+      out <- list()
+      gid.bp <- pheno$GID[pheno$BP %in% bp]
+      genoBP=geno.sc[gid.bp,]
+      phenoBP=pheno[match(gid.bp,pheno$GID),]
+      ## select the set of traits with more than 50 observations
+      traits.50obs <- traits[which(colSums(!is.na(phenoBP[,traits])) > 50)]
+      
+      out[[bp]] <-  compute_GP_methods(geno=genoBP, pheno=phenoBP,
+                                       traits=traits.50obs, 
+                                       GP.method=meth,
+                                       nreps=nreps, nfolds=nfolds, 
+                                       p2d.temp=p2d.temp,
+                                       h=h,
+                                       p2f.stats=p2f.stats, 
+                                       nb.cores=nb.cores)
+      ## export obs vs. pred
+      obs.pred[[bp]] <- purrr::map_dfr(traits, function(x) out[[bp]]$obspred[[x]]) |> 
+        mutate(trainSetBP=bp, validSetBP=bp)
+      ## record training and validation set BP
+      out[[bp]]$gp.stats$trainSetBP <- bp
+      out[[bp]]$gp.stats$validSetBP <- bp
+      #gp.statsT <- purrr::map_dfr(outT, function(x) x$gp.stats)
+      gp.wBP <- plyr::rbind.fill(gp.wBP,out[[bp]]$gp.stats)
+      
+      ## export observed vs predicted values
+      p2f <- here("output","genom_pred",paste0("observed-vs-predicted_wBP_",meth,".rds"))
+      saveRDS(obs.pred, p2f)
+    } else{
+      tmp <- read.table(file=p2f.stats, sep="\t", header=TRUE)
+      tmp$trainSetBP <- bp
+      tmp$validSetBP <- bp
+      gp.wBP <- plyr::rbind.fill(gp.wBP, tmp)
+      
+    }
+  }
+}
+## aggregate the results, average over the rep
+#ap(gp.wBP)
+round(tapply(gp.wBP$corP, gp.wBP$trait, mean, na.rm=T),3)
+round(tapply(gp.wBP$corP, gp.wBP$trainSetBP, mean, na.rm=T),3)
+gp.wBP$scenario <- "wBP"
+
+
+gp.wBP <- gp.wBP |> 
+  group_by(trait, GP.method, scenario, trainSetBP, validSetBP) |> 
+  summarize(across(where(is.numeric), mean),.groups="drop") |> 
+  dplyr::select(-rep)
+
+
+# gp.wBP <- gp.wBP |> group_by(trait, GP.method, scenario,BP) |> 
+#   summarize(corP=mean(corP, na.rm=T))
+```
+
+## acBP scenarios
+
+Training set: each breeding program.
+Validation set: each breeding program except the training set.
+
+### Main one
+
+```{r gp_acBP}
+df.stats <- expand.grid(trainSet=BPs, validSet=BPs, stringsAsFactors = F)
+df.stats <- filter(df.stats, !trainSet == validSet)
+gp.acBP <- data.frame()
+obs.pred <- list()
+rerun=F
+for(bp in BPs){
+  trainSetBP <- bp
+  
+  p2f.stats <- here("output","genom_pred",
+                    paste0(bp,"-Train_","GP_",
+                           meth,"_results_acBP",suf,".tsv"))
+  if(!file.exists(p2f.stats) |rerun){
+    write(paste(trainSetBP,"training set\n"),stderr())
+    ## training set: each individual BP
+    gid.train <- pheno$GID[pheno$BP %in% bp]
+    gid.valid.all <- pheno$GID[!pheno$BP %in% bp]
+    
+    genoBP=geno.sc[c(gid.train,gid.valid.all),]
+    phenoBP=pheno[match(c(gid.train,gid.valid.all),pheno$GID),]
+    
+    ## mask the phenotype traits as NA for the validation set
+    phenoBP[phenoBP$GID %in% gid.valid.all,traits] <- NA
+    ## select the set of traits with more than 50 observations 
+    traits.50obs <- traits[which(colSums(!is.na(phenoBP[,traits])) > 50)]
+    ## subselect traits in the validation set as well
+    traits.50obs <- traits.50obs[which(colSums(
+      !is.na(pheno[match(gid.valid.all,pheno$GID),traits.50obs])) > 50)]
+    
+    ## compute genomic prediction
+    pred <- compute_GP_allGeno(geno=genoBP, pheno=phenoBP,
+                               traits=traits.50obs, 
+                               GP.method=meth,
+                               runCV=FALSE, 
+                               testSetGID=gid.valid.all,
+                               nb.cores=nb.cores,
+                               p2d.temp=p2d.temp)
+    ## calculate the predictive ability
+    ### put as long format
+    pred.long <- tidyr::pivot_longer(pred, cols=all_of(traits.50obs),
+                                     names_to="trait",values_to="pred")
+    ### add observed value
+    pheno.obs <- pheno |> #filter(BP %in% validSetBP) |> 
+      dplyr::select(all_of(c("GID","BP",traits.50obs))) |>
+      tidyr::pivot_longer(cols=all_of(traits.50obs), 
+                          names_to="trait",values_to="obs") %>% 
+      mutate(trait=factor(trait, traits.50obs)) %>% 
+      filter(!is.na(obs))
+    
+    ## number of ValidSet genotypes for each trait and BP
+    VS.size <- pheno.obs %>% group_by(BP,trait) %>% 
+      summarize(n=n(), .groups="drop")
+    ## valid set / trait combo to remove if less than 50 obs
+    comb2rem <- VS.size %>% filter(n < 50) %>% mutate(trait_BP=paste0(trait,"_",BP))
+    ## add BP + obs
+    pred.long <- merge(pred.long,pheno.obs, by=c("GID","trait")) 
+    
+    ## export obs vs pred
+    obs.pred[[bp]] <- pred.long
+    obs.pred[[bp]]$trainSetBP <- bp
+    
+    ## calculate the correlation between obs/pred and add statistics
+    pred.stats <- pred.long |> 
+      group_by(trait,BP) |> 
+      summarize(corP=round(cor(obs,pred, use="pairwise.complete.obs"),3),.groups="drop") |> 
+      mutate(GP.method=meth,
+             trait_BP=paste0(trait,"_",BP)) %>%
+      filter(!trait_BP %in% comb2rem$trait_BP) %>% 
+      mutate(trainSetBP=trainSetBP,.after=GP.method)  %>% 
+      rename(validSetBP=BP) %>% dplyr::select(-trait_BP)
+    
+    write.table(pred.stats, file=p2f.stats, sep="\t",row.names=F)
+    gp.acBP <- rbind(gp.acBP,pred.stats)
+    ## save obs vs. pred
+    p2f <- here("output","genom_pred",paste0("observed-vs-predicted_acBP_",meth,".rds"))
+    saveRDS(obs.pred, p2f)
+    
+  } else{
+    gp.acBP <- plyr::rbind.fill(gp.acBP, 
+                                read.table(file=p2f.stats,sep="\t", header=TRUE))
+    
+  }
+}
+gp.acBP$scenario <- "acBP"
+```
+
+
+### acBP NUR since specific date
+
+Training set: URN/URSN genotypes since 2005.
+Validation set: breeding program.
+
+We are testing if it is useful to add old nursery genotypes to predict the breeding program. 
+
+
+```{r}
+dates <- seq(2000,2020, by=5)
+gp.acBP.date <- data.frame()
+rerun=F
+obs.pred <- list()
+
+for(date in dates){
+  write(paste0("since ",date,"\n"), stderr())
+  pheno.sinceDate <- pheno |>
+    filter(BP %in% "NUR", GID %in% nur.info$GID[nur.info$FIRST_YEAR >= date]) |> 
+    bind_rows(pheno |> filter(!BP %in% "NUR"))
+  
+  df.stats <- expand.grid(trainSet="NUR",stringsAsFactors = F)
+  
+  trainSetBP <- bp <- "NUR"
+  p2f.stats <- here("output","genom_pred",
+                    paste0(bp,"-Train_","GP_",
+                           meth,"_results_acBP-since",date,suf,".tsv"))
+  if(!file.exists(p2f.stats) |rerun){
+    ## training set: NUR
+    gid.train <- pheno.sinceDate$GID[pheno.sinceDate$BP %in% bp]
+    gid.valid.all <- pheno.sinceDate$GID[!pheno.sinceDate$BP %in% bp]
+    
+    genoBP=geno.sc[c(gid.train,gid.valid.all),]
+    phenoBP=pheno.sinceDate[match(c(gid.train,gid.valid.all),pheno.sinceDate$GID),]
+    
+    ## mask the phenotype traits as NA for the validation set
+    phenoBP[phenoBP$GID %in% gid.valid.all,traits] <- NA
+    ## select the set of traits with more than 50 observations 
+    traits.50obs <- traits[which(colSums(!is.na(phenoBP[,traits])) > 50)]
+    ## subselect traits in the validation set as well
+    traits.50obs <- traits.50obs[which(colSums(
+      !is.na(pheno[match(gid.valid.all,pheno$GID),traits.50obs])) > 50)]
+    
+    ## compute genomic prediction
+    pred <- compute_GP_allGeno(geno=genoBP, pheno=phenoBP,
+                               traits=traits.50obs, 
+                               GP.method=meth,
+                               runCV=FALSE, 
+                               testSetGID=gid.valid.all,
+                               nb.cores=nb.cores,
+                               p2d.temp=p2d.temp)
+    ## calculate the predictive ability
+    ### put as long format
+    pred.long <- tidyr::pivot_longer(pred, cols=all_of(traits.50obs),
+                                     names_to="trait",values_to="pred")
+    ### add observed value
+    pheno.obs <- pheno |> #filter(BP %in% validSetBP) |> 
+      dplyr::select(all_of(c("GID","BP",traits.50obs))) |>
+      tidyr::pivot_longer(cols=all_of(traits.50obs), 
+                          names_to="trait",values_to="obs") %>% 
+      mutate(trait=factor(trait, traits.50obs)) %>% 
+      filter(!is.na(obs))
+    
+    ## number of ValidSet genotypes for each trait and BP
+    VS.size <- pheno.obs %>% group_by(BP,trait) %>% 
+      summarize(n=n(), .groups="drop")
+    ## valid set / trait combo to remove if less than 50 obs
+    comb2rem <- VS.size %>% filter(n < 50)
+    ## add BP + obs
+    pred.long <- merge(pred.long,pheno.obs, by=c("GID","trait")) 
+    ## export obs vs pred
+    obs.pred[[paste0("since",date)]] <- pred.long
+    obs.pred[[paste0("since",date)]]$trainSetBP <- paste0("NUR-since",date)
+    ## calculate the correlation between obs/pred and add statistics
+    pred.stats <- pred.long |> 
+      group_by(trait,BP) |> 
+      summarize(corP=round(cor(obs,pred, use="pairwise.complete.obs"),3),.groups="drop") |> 
+      mutate(GP.method=meth) %>% 
+      filter(!(trait %in% comb2rem$trait & BP %in% comb2rem$BP)) %>% 
+      mutate(trainSetBP=paste0("NUR-since",date),.after=GP.method,
+             scenario="acBP-NUR-sinceDate")  %>% 
+      rename(validSetBP=BP) |> 
+      mutate(nb.genos.TS=length(gid.train)) |> 
+      left_join(VS.size, by=c("validSetBP"="BP","trait")) |> rename(nb.genos.VS=n)
+    
+    write.table(pred.stats, file=p2f.stats, sep="\t",row.names=F)
+    gp.acBP.date <- rbind(gp.acBP.date,pred.stats)
+    ## save obs vs. pred
+    p2f <- here("output","genom_pred",paste0("observed-vs-predicted_acBP-since",date,"_",meth,".rds"))
+    saveRDS(obs.pred, p2f)
+  } else{
+    gp.acBP.date <- plyr::rbind.fill(gp.acBP.date, 
+                                     read.table(file=p2f.stats,sep="\t", header=TRUE))
+  }
+}
+
+table(gp.acBP.date$trainSetBP)
+tapply(gp.acBP.date$corP, gp.acBP.date$trainSetBP, mean)
+```
+
+
+### acBP NUR URN/URSN only
+
+```{r}
+gp.acBP.nur <- data.frame()
+rerun=F
+obs.pred <- list()
+nurseries <- c("URN","URSN")
+
+for(nur in nurseries){
+  write(paste0("Nursery ",nur,"\n"), stderr())
+  pheno.nur <- pheno |>
+    filter(BP %in% "NUR", 
+           GID %in% nur.info$GID[nur.info$NURSERY %in% c("BOTH",nur)]) |> 
+    bind_rows(pheno |> filter(!BP %in% "NUR"))
+  
+  trainSetBP <- bp <- "NUR"
+  p2f.stats <- here("output","genom_pred",
+                    paste0(bp,"-Train_","GP_",
+                           meth,"_results_acBP-",nur,suf,".tsv"))
+  if(!file.exists(p2f.stats) |rerun){
+    ## training set: NUR
+    gid.train <- pheno.nur$GID[pheno.nur$BP %in% bp]
+    gid.valid.all <- pheno.nur$GID[!pheno.nur$BP %in% bp]
+    
+    genoBP <- geno.sc[c(gid.train,gid.valid.all),]
+    phenoBP <- pheno.nur[match(c(gid.train,gid.valid.all),pheno.nur$GID),]
+    
+    ## mask the phenotype traits as NA for the validation set
+    phenoBP[phenoBP$GID %in% gid.valid.all,traits] <- NA
+    ## select the set of traits with more than 50 observations 
+    traits.50obs <- traits[which(colSums(!is.na(phenoBP[,traits])) > 50)]
+    ## subselect traits in the validation set as well
+    traits.50obs <- traits.50obs[which(colSums(
+      !is.na(pheno[match(gid.valid.all,pheno$GID),traits.50obs])) > 50)]
+    
+    ## compute genomic prediction
+    pred <- compute_GP_allGeno(geno=genoBP, pheno=phenoBP,
+                               traits=traits.50obs, 
+                               GP.method=meth,
+                               runCV=FALSE, 
+                               testSetGID=gid.valid.all,
+                               nb.cores=nb.cores,
+                               p2d.temp=p2d.temp)
+    ## calculate the predictive ability
+    ### put as long format
+    pred.long <- tidyr::pivot_longer(pred, cols=all_of(traits.50obs),
+                                     names_to="trait",values_to="pred")
+    ### add observed value
+    pheno.obs <- pheno |> #filter(BP %in% validSetBP) |> 
+      dplyr::select(all_of(c("GID","BP",traits.50obs))) |>
+      tidyr::pivot_longer(cols=all_of(traits.50obs), 
+                          names_to="trait",values_to="obs") %>% 
+      mutate(trait=factor(trait, traits.50obs)) %>% 
+      filter(!is.na(obs))
+    
+    ## number of ValidSet genotypes for each trait and BP
+    VS.size <- pheno.obs %>% group_by(BP,trait) %>% 
+      summarize(n=n(), .groups="drop")
+    ## valid set / trait combo to remove if less than 50 obs
+    comb2rem <- VS.size %>% filter(n < 50)
+    ## add BP + obs
+    pred.long <- merge(pred.long,pheno.obs, by=c("GID","trait")) 
+    ## export obs vs pred
+    obs.pred[[nur]] <- pred.long
+    obs.pred[[nur]]$trainSetBP <- nur
+    ## calculate the correlation between obs/pred and add statistics
+    pred.stats <- pred.long |> 
+      group_by(trait,BP) |> 
+      summarize(corP=round(cor(obs,pred,
+                               use="pairwise.complete.obs"),3),.groups="drop") |> 
+      mutate(GP.method=meth) %>% 
+      filter(!(trait %in% comb2rem$trait & BP %in% comb2rem$BP)) %>% 
+      mutate(trainSetBP=nur,.after=GP.method,
+             scenario="acBP-NUR")  %>% 
+      rename(validSetBP=BP) |> 
+      mutate(nb.genos.TS=length(gid.train)) |> 
+      left_join(VS.size, by=c("validSetBP"="BP","trait")) |> rename(nb.genos.VS=n)
+    
+    write.table(pred.stats, file=p2f.stats, sep="\t",row.names=F)
+    gp.acBP.nur <- rbind(gp.acBP.nur,pred.stats)
+    ## save obs vs. pred
+    p2f <- here("output","genom_pred",paste0("observed-vs-predicted_acBP-",
+                                             nur,"_",meth,".rds"))
+    saveRDS(obs.pred, p2f)
+  } else{
+    gp.acBP.nur <- plyr::rbind.fill(gp.acBP.nur, 
+                                     read.table(file=p2f.stats,sep="\t", header=TRUE))
+  }
+}
+
+table(gp.acBP.nur$trainSetBP)
+tapply(gp.acBP.nur$corP, gp.acBP.nur$trainSetBP, mean)
+```
+
+
+
+## acAllBP scenario
+
+acAllBP: across BP but using data from all other breeding program in the training set: NDSU + SDSU + URN/URSN -> MSU for example.
+
+
+```{r gp-acAllBP}
+gp.acAllBP <- data.frame()
+rerun=F
+obs.pred <- list()
+for(bp in BPs){
+  p2f.stats <- here("output","genom_pred",
+                    paste0(bp,"-Valid_GP_",meth,"_results_acAllBP",suf,".tsv"))
+  if(!file.exists(p2f.stats) |rerun){
+    write(paste(bp,"validation set\n"),stderr())
+    ## training set: all other breeding program /data
+    gid.train <- pheno$GID[!pheno$BP %in% bp]
+    gid.valid <- pheno$GID[pheno$BP %in% bp]
+    phenoBP <- pheno; phenoBP[match(gid.valid, pheno$GID),traits] <- NA
+    ## mask the phenotype traits as NA for the validation set
+    ## select the set of traits with more than 50 observations
+    traits.50obs <- traits[which(colSums(!is.na(phenoBP[,traits])) > 50)]
+    ## subselect traits in the validation set as well
+    traits.50obs <- traits.50obs[which(colSums(
+      !is.na(pheno[match(gid.valid,pheno$GID),traits.50obs])) > 50)]
+    ## compute genomic prediction
+    pred <- compute_GP_allGeno(geno=geno.sc, pheno=phenoBP,
+                               traits=traits.50obs, 
+                               GP.method=meth,
+                               runCV=FALSE, 
+                               testSetGID=gid.valid,
+                               nb.cores=nb.cores,
+                               p2d.temp=p2d.temp)
+    ## calculate the predictive ability
+    ### put as long format
+    pred.long <- tidyr::pivot_longer(pred, cols=all_of(traits.50obs),
+                                     names_to="trait",values_to="pred")
+    ### add observed value
+    pheno.obs <- pheno |> filter(GID %in% gid.valid) |> 
+      dplyr::select(all_of(c("GID",traits.50obs))) |> 
+      tidyr::pivot_longer(cols=all_of(traits.50obs), 
+                          names_to="trait",values_to="obs") %>% 
+      mutate(trait=factor(trait, traits.50obs))
+    
+    ## calculate genetic relatedness btw training and validation set
+    ## get the list of training and validation set genotypes by trait
+    gid.train.tr <- apply(phenoBP[,traits.50obs],2,\(x) phenoBP$GID[!is.na(x)])
+    gid.valid.tr <- split(pheno.obs, pheno.obs$trait)
+    gid.valid.tr <- lapply(gid.valid.tr, \(x) unique(x$GID[!is.na(x$obs)]))
+    stopifnot(identical(names(gid.train.tr),names(gid.valid.tr)))
+    
+    pred.long <- merge(pred.long,pheno.obs)
+    ## export obs vs pred
+    obs.pred[[bp]] <- pred.long
+    obs.pred[[bp]]$validSetBP <- bp
+    ## calculate the correlation between obs/pred and add statistics
+    pred.stats <- pred.long |> group_by(trait) |> 
+      summarize(corP=round(cor(obs,pred, use="pairwise.complete.obs"),3),
+                GP.method=meth,
+                nb.genos.VS=length(na.omit(obs))) |> 
+      mutate(validSetBP=bp,.after=GP.method) |> 
+      bind_cols(nb.genos.TS=c(sapply(gid.train.tr,length))) 
+    
+    write.table(pred.stats, file=p2f.stats, sep="\t",row.names=F)
+    gp.acAllBP <- rbind(gp.acAllBP,pred.stats)
+    ## save obs vs pred
+    p2f <- here("output","genom_pred",paste0("observed-vs-predicted_acAllBP_",meth,".rds"))
+    saveRDS(obs.pred, p2f)
+  } else{
+    gp.acAllBP <- rbind(gp.acAllBP, read.table(file=p2f.stats, sep="\t", header=TRUE))
+    
+  }
+}
+gp.acAllBP$scenario <- "acAllBP"
+print_table(gp.acAllBP)
+
+```
+
+
+
+
+
+
+## nursBP scenario
+
+nursBP: training using nursery genotypes from the breeding program to be predicted.
+
+```{r gp-nursBP}
+gp.nursBP <- data.frame()
+rerun=F
+obs.pred <- list()
+for(bp in BPs[!BPs %in% "NUR"]){
+  p2f.stats <- here("output","genom_pred",
+                    paste0(bp,"-Valid_GP_",meth,"_results_nursBP",suf,".tsv"))
+  if(!file.exists(p2f.stats) |rerun){
+    write(paste(bp,"validation set\n"),stderr())
+    ## validation set: each individual BP (no nursery)
+    gid.valid <- pheno$GID[pheno$BP %in% bp]
+    ## training set: each individual BP
+    gid.train <- intersect(gid.nur, nur.info$GID[nur.info$SOURCE %in% bp])
+    phenoBP <- pheno[match(c(gid.train, gid.valid), pheno$GID),] 
+    phenoBP[match(gid.valid, phenoBP$GID),traits] <- NA
+    genoBP <- geno.sc[c(gid.train, gid.valid),]
+    ## mask the phenotype traits as NA for the validation set
+    ## select the set of traits with more than 50 observations
+    traits.50obs <- traits[which(colSums(!is.na(phenoBP[,traits])) > 50)]
+    ## subselect traits in the validation set as well
+    traits.50obs <- traits.50obs[which(colSums(
+      !is.na(pheno[match(gid.valid,pheno$GID),traits.50obs])) > 50)]
+    ## training set size
+    nb.genos.TS <- tibble(trait=traits.50obs,
+                          nb.genos.TS=colSums(!is.na(phenoBP[,traits.50obs])))
+    
+    ## compute genomic prediction
+    pred <- compute_GP_allGeno(geno=genoBP, pheno=phenoBP,
+                               traits=traits.50obs, 
+                               GP.method=meth,
+                               runCV=FALSE, 
+                               testSetGID=gid.valid,
+                               nb.cores=nb.cores,
+                               p2d.temp=p2d.temp)
+    ## calculate the predictive ability
+    ### put as long format
+    pred.long <- tidyr::pivot_longer(pred, cols=all_of(traits.50obs),
+                                     names_to="trait",values_to="pred")
+    ### add observed value
+    pheno.obs <- pheno |> filter(BP %in% bp) |> 
+      dplyr::select(all_of(c("GID",traits.50obs))) |> 
+      tidyr::pivot_longer(cols=all_of(traits.50obs), 
+                          names_to="trait",values_to="obs") %>% 
+      mutate(trait=factor(trait, traits.50obs))
+    ## calculate genetic relatedness btw training and validation set
+    ## get the list of training and validation set genotypes by trait
+    gid.train.tr <- apply(phenoBP[,traits.50obs],2,\(x) phenoBP$GID[!is.na(x)])
+    gid.valid.tr <- split(pheno.obs, pheno.obs$trait)
+    gid.valid.tr <- lapply(gid.valid.tr, \(x) unique(x$GID[!is.na(x$obs)]))
+    stopifnot(identical(names(gid.train.tr),names(gid.valid.tr)))
+    # summ.rel <- map2_dfr(gid.train.tr, gid.valid.tr, 
+    #                      \(x,y) summary(c(GRM[x,y]))[c(1,3,4,6)]) %>% 
+    #   bind_cols(trait=names(gid.train.tr))
+    # 
+    pred.long <- merge(pred.long,pheno.obs)
+    ## export obs vs pred
+    obs.pred[[bp]] <- pred.long
+    obs.pred[[bp]]$validSetBP <- bp
+    ## calculate the correlation between obs/pred and add statistics
+    pred.stats <- pred.long |> group_by(trait) |> 
+      summarize(corP=round(cor(obs,pred, use="pairwise.complete.obs"),3),
+                GP.method=meth,
+                nb.genos.VS=length(na.omit(obs))) |> 
+      mutate(validSetBP=bp,.after=GP.method) |>
+      bind_cols(nb.genos.TS=c(sapply(gid.train.tr,length)))# %>% 
+    #left_join(summ.rel, by="trait")
+    #left_join(nb.genos.TS, by="trait")
+    
+    write.table(pred.stats, file=p2f.stats, sep="\t",row.names=F)
+    gp.nursBP <- rbind(gp.nursBP,pred.stats)
+    ## save obs vs pred
+    p2f <- here("output","genom_pred",paste0("observed-vs-predicted_nursBP_",meth,".rds"))
+    saveRDS(obs.pred, p2f)
+  } else{
+    gp.nursBP <- plyr::rbind.fill(gp.nursBP, 
+                                  read.table(file=p2f.stats, sep="\t", header=TRUE))
+    
+  }
+}
+gp.nursBP$scenario <- "nursBP"
+
+```
+
+
+
+
+
+# Combine results
+
+```{r}
+all.res.list <- list(gp.wBP
+                     , gp.acBP
+                     ,gp.acBP.date
+                     ,gp.acBP.nur
+                     ,gp.acAllBP
+                     ,gp.nursBP)
+#gp.wTPE,gp.acTPE)
+lapply(all.res.list, dim)
+all.res <- plyr::rbind.fill(all.res.list)
+table(all.res$scenario)
+p2f <- here("output",paste0("genom-pred_all-scenarios_",meth,
+                            "-method_BPs_pred-ab",suf,".tsv"))
+write.table(all.res,file=p2f, sep="\t", row.names=FALSE)
+```
+
+
+# Appendix
+
+```{r info}
+t1 <- proc.time(); t1 - t0
+print(sessionInfo(), locale=FALSE)
+```
+
+

@@ -1,0 +1,688 @@
+---
+title: "Extract genetic relatedness by prediction scenario"
+author: Charlotte Brault
+output: html_document
+date: '`r format(Sys.time(), "%d %B, %Y")`'
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Libraries
+
+```{r load libraries}
+suppressPackageStartupMessages(library(here)) # root directory
+suppressPackageStartupMessages(library(data.table)) # load data
+suppressPackageStartupMessages(library(apercu)) # ap
+suppressPackageStartupMessages(library(dplyr)) # formatting
+suppressPackageStartupMessages(library(knitr)) # table display
+suppressPackageStartupMessages(library(ggplot2)) # plot
+suppressPackageStartupMessages(library(janitor)) # formatting
+suppressPackageStartupMessages(library(purrr)) # handle lists
+suppressPackageStartupMessages(library(paletteer)) # color palette
+suppressPackageStartupMessages(library(viridis)) # color palette
+suppressPackageStartupMessages(library(bigstatsr)) # theme
+#suppressPackageStartupMessages(library(TrainSel)) # training set optimization
+suppressPackageStartupMessages(library(heritability)) # heritability
+
+#devtools::install_github("chabrault/HRSWGS")
+suppressPackageStartupMessages(library(HRSWGS)) ## custom functions
+```
+
+
+# Set up root directory
+
+```{r current dir}
+here::i_am("analysis/extract_gen-rel_prediction-scenario.Rmd")
+```
+
+
+This R chunk is used to assess how much time it takes to execute the R code in this document until the end:
+
+```{r time_0}
+t0 <- proc.time()
+```
+
+
+
+
+# Load combined data
+Generated in `HRSW_BP_BP/analysis/format_inputs_FHB.Rmd`.
+
+```{r}
+p2f <- here("data","inputs_GP_BP_FHB.rds")
+file.mtime(p2f)
+tools::md5sum(p2f)
+dat <- readRDS(p2f)
+## unlist elements and add them to the environment
+list2env(dat, globalenv())
+pheno <- gv
+(BPs <- unique(pheno$BP))
+(traits <- colnames(pheno)[!colnames(pheno) %in% c("GID","BP")])
+GRM <- rrBLUP::A.mat(geno)
+gid.nur <- pheno$GID[pheno$BP %in% "NUR"]
+
+map_dbl(pheno, n_distinct)
+dim(GRM)
+```
+
+
+# Compose training and validation sets 
+
+## Definition of scenarios
+
+Genomic predictions scenarios:
+
+- **wBP**: within each BP, the nursery being considered as a breeding program here.
+
+- **acBP**: across each pair of BP, the nursery being considered as a breeding program here. The training set is composed of one breeding program. For example, NDSU -> SDSU, NDSU -> URN/URSN, ...We will extract more specifically how well the nursery is predicting the individual breeding program.
+
+- **acAllBP**: across BP but using data from all other breeding program in the training set: NDSU + SDSU + URN/URSN -> MSU for example.
+
+- **nursBP**: training using nursery genotypes from the breeding program to be predicted.
+
+For all the predictions, record the training/validation set size and the genetic relatedness.
+
+Questions:
+
+- Need a better control of training/validation set sizes with resampling?
+- Test training set optimization?
+- Study the contribution of parameters to the predictive ability?
+
+## Prediction parameters
+
+Cross-validation parameters:
+```{r CV_params}
+dim(pheno) ## 3270 x 11
+stopifnot(!any(duplicated(pheno$GID)))
+## params:
+nreps <- 10 ## number of cross-validation repetitions
+nfolds <- 10 ## number of cross-validation folds
+```
+
+# Define functions
+
+```{r}
+calcRel <- function(gid.train, gid.valid, GRM){
+  rel.mat <- GRM[gid.train, gid.valid]
+  summ.rel <- quantile(x=c(rel.mat), probs=seq(0,1,0.1))
+  return(summ.rel)
+}
+
+getMostRel <- function(rel.mat, thresh.val){
+  mostRel <- data.frame()
+  for(i in 1:nrow(rel.mat)){
+    for(j in 1:ncol(rel.mat)){
+      if(rel.mat[i,j] > thresh.val){
+        mostRel <- rbind(mostRel, rel.mat[i,j])
+        rownames(mostRel)[nrow(mostRel)] <- paste(rownames(rel.mat)[i], colnames(rel.mat)[j], sep="-")
+      }
+    }
+  }
+  return(mostRel)
+}
+
+allFreq <- function(geno){
+  apply(geno, 2, function(x) {
+    counts <- tabulate(x+1)
+    max(counts) / length(x)
+  })
+}
+
+
+
+RogerDistance <- function(geno1,geno2){
+  ## Roger's distance between two groups of genotypes
+  stopifnot(ncol(geno1) == ncol(geno2))
+  AF1 <- allFreq(geno1)
+  AF2 <- allFreq(geno2)
+  n_SNP <- ncol(geno1)
+  R_dist <- sum(sqrt((AF1-AF2)^2))/n_SNP
+  return(R_dist)
+}
+#Rdist=RogerDistance(geno1=geno[1:100,], geno2=geno[200:350,])
+```
+
+
+## wBP scenario
+
+wBP: within each BP, the nursery being considered as a breeding program here.
+```{r apply_gp_all_wBP}
+calcRels <- data.frame()
+for(bp in BPs){
+  gid.bp <- pheno$GID[pheno$BP %in% bp]
+  genoBP=geno[gid.bp,]
+  phenoBP=pheno[match(gid.bp,pheno$GID),]
+  ## select the set of traits with more than 50 observations
+  traits.50obs <- traits[which(colSums(!is.na(phenoBP[,traits])) > 50)]
+  ## calculate genetic relatedness training vs. validation set cross-validation
+  for(tr in traits.50obs){
+    pheno_tr <- stats::na.omit(phenoBP[, c("GID", tr)])
+    inds <- intersect(pheno_tr$GID, rownames(genoBP))
+    for(r in 1:nreps){
+      folds <- getFolds(index=length(inds), nb.folds=nfolds, seed=r+57425)
+      calcRelsR <- map_dfr(1:nfolds, \(fold){
+        gid.valid <- inds[folds[[fold]]]
+        gid.train <- setdiff(inds, gid.valid)
+        #summ.rel <- calcRel(gid.train, gid.valid, GRM)
+        Rdist <- RogerDistance(geno1=geno[gid.train,], geno2=geno[gid.valid,])
+        return(data.frame(trainSetBP=bp,
+                          validSetBP=bp,
+                          scenario="wBP",
+                          trait=tr,
+                          nb.genos.TS=length(gid.train),
+                          nb.genos.VS=length(gid.valid),
+                          Roger_distance=Rdist,
+                          rep=r,
+                          fold=fold)
+               # quantiles=names(summ.rel),
+               # values=as.numeric(summ.rel))
+        )
+      })
+      calcRels <- rbind(calcRelsR, calcRels)
+    }
+  } 
+}
+## summarize over folds and rep
+# calcRels <- calcRels |> 
+#   group_by(trainSetBP, validSetBP, scenario, trait, nb.genos.TS,
+#            nb.genos.VS, quantiles) |>
+#   summarize(values=mean(values),
+#             nb.genos.TS=mean(nb.genos.TS),
+#             nb.genos.VS=mean(nb.genos.VS), .groups="drop")
+
+calcRels <- calcRels |> 
+  group_by(trainSetBP, validSetBP, scenario, trait, nb.genos.TS,
+           nb.genos.VS) |>
+  summarize(Roger_distance=mean(Roger_distance),
+            nb.genos.TS=mean(nb.genos.TS),
+            nb.genos.VS=mean(nb.genos.VS), .groups="drop")
+
+## aggregate the results, average over the rep
+# gp.wBP <- calcRels |> filter(quantiles == "50%") |> 
+#   group_by(trainSetBP,validSetBP, scenario, trait) |>
+#   summarize(meanRel=mean(values), 
+#             nb.genos.TS=mean(nb.genos.TS),
+#             nb.genos.VS=mean(nb.genos.VS),
+#             .groups="drop")
+# print_table(gp.wBP)
+```
+
+## acBP scenario
+
+Training set: each breeding program.
+Validation set: each breeding program except the training set.
+
+```{r gp_acBP}
+df.stats <- expand.grid(trainSet=BPs, validSet=BPs, stringsAsFactors = F)
+df.stats <- filter(df.stats, !trainSet == validSet)
+acBP <- data.frame()
+for(i in 1:nrow(df.stats)){
+  trainSetBP <- df.stats$trainSet[i]
+  validSetBP <- df.stats$validSet[i]
+  ## training set: each individual BP
+  gid.train <- pheno$GID[pheno$BP %in% trainSetBP]
+  gid.valid <- pheno$GID[pheno$BP %in% validSetBP]
+  genoBP=geno[c(gid.train,gid.valid),]
+  phenoBP=pheno[match(c(gid.train,gid.valid),pheno$GID),]
+  ## select the set of traits with more than 50 observations 
+  traits.50obs <- traits[which(colSums(!is.na(phenoBP[,traits])) > 50)]
+  
+  for(tr in traits.50obs){
+    gid.train.tr <- intersect(gid.train, phenoBP$GID[!is.na(phenoBP[, tr])])
+    gid.valid.tr <- intersect(gid.valid, phenoBP$GID[!is.na(phenoBP[, tr])])
+    #values <- calcRel(gid.train.tr, gid.valid.tr, GRM)
+    Rdist <- RogerDistance(geno1=geno[gid.train.tr,], geno2=geno[gid.valid.tr,])
+    df <- data.frame(trainSetBP=trainSetBP,
+                     validSetBP=validSetBP,
+                     scenario="acBP",
+                     trait=tr,
+                     Roger_distance=Rdist,
+                     nb.genos.TS=length(gid.train.tr),
+                     nb.genos.VS=length(gid.valid.tr)#,
+                     # quantiles=names(values),
+                     # values=as.numeric(values)
+               
+    )
+    acBP <- plyr::rbind.fill(acBP, df)
+    rm(df)
+  }
+}
+
+
+# ## examine acBP results
+# summary(acBP$nb.genos.TS)
+# head(acBP)
+# acBP |> 
+#   filter(quantiles == "50%") |> 
+#   group_by(trainSetBP, validSetBP) |> 
+#   summarize(meanRel=mean(values, na.rm=T), .groups="drop") |> 
+#   arrange(desc(meanRel)) |> 
+#   print_table()
+calcRels <- plyr::rbind.fill(calcRels, acBP)
+```
+
+### Since date
+
+```{r acBP_NUR_sinceDate}
+dates <- c("all",seq(2000,2020, by=5))
+acBP_sinceDate <- data.frame()
+
+for(validSetBP in BPs[!BPs %in% "NUR"]){
+  for(date in dates){
+    #write(paste0("since ",date,"\n"), stderr())
+    if(date == "all"){
+      pheno.sinceDate <- pheno |>
+        filter(BP %in% "NUR") |> 
+        bind_rows(pheno |> filter(!BP %in% "NUR"))
+    }else{
+      pheno.sinceDate <- pheno |>
+        filter(BP %in% "NUR", GID %in% nur.info$GID[nur.info$FIRST_YEAR >= as.numeric(date)]) |> 
+        bind_rows(pheno |> filter(!BP %in% "NUR"))
+    }
+    
+    df.stats <- expand.grid(trainSet="NUR",stringsAsFactors = F)
+    trainSetBP <- "NUR"
+    ## training set: NUR
+    gid.train <- pheno.sinceDate$GID[pheno.sinceDate$BP %in% trainSetBP]
+    gid.valid <- pheno.sinceDate$GID[pheno.sinceDate$BP %in% validSetBP]
+    
+    genoBP=geno.sc[c(gid.train,gid.valid),]
+    phenoBP=pheno.sinceDate[match(c(gid.train,gid.valid),pheno.sinceDate$GID),]
+    
+    ## select the set of traits with more than 50 observations 
+    traits.50obs <- traits[which(colSums(!is.na(phenoBP[,traits])) > 50)]
+    ## subselect traits in the validation set as well
+    traits.50obs <- traits.50obs[which(colSums(
+      !is.na(pheno[match(gid.valid,pheno$GID),traits.50obs])) > 50)]
+    
+    for(tr in traits.50obs){
+      gid.train.tr <- intersect(gid.train, phenoBP$GID[!is.na(phenoBP[, tr])])
+      gid.valid.tr <- intersect(gid.valid, phenoBP$GID[!is.na(phenoBP[, tr])])
+      #values <- calcRel(gid.train.tr, gid.valid.tr, GRM)
+      Rdist <- RogerDistance(geno1=geno[gid.train.tr,], geno2=geno[gid.valid.tr,])
+      df <- data.frame(trainSetBP=trainSetBP,
+                       validSetBP=validSetBP,
+                       scenario="acBP_sinceDate",
+                       date=date,
+                       trait=tr,
+                       Roger_distance=Rdist,
+                       nb.genos.TS=length(gid.train.tr),
+                       nb.genos.VS=length(gid.valid.tr)#,
+                       # quantiles=names(values),
+                       # values=as.numeric(values)
+                       
+      )
+      acBP_sinceDate <- plyr::rbind.fill(acBP_sinceDate, df)
+      rm(df)
+    }
+  }
+}
+calcRels <- plyr::rbind.fill(calcRels, acBP_sinceDate)
+```
+
+
+
+### URN/URSN separately
+
+Calculate genetic distance with URN and URSN with BP separately
+```{r}
+df.stats <- expand.grid(trainSet=c("URN","URSN"), validSet=BPs, stringsAsFactors = F)
+acBP_NUR <- data.frame()
+for(i in 1:nrow(df.stats)){
+  trainSetBP <- df.stats$trainSet[i]
+  validSetBP <- df.stats$validSet[i]
+  ## training set: each individual BP
+  gid.train <- intersect(pheno$GID, nur.info$GID[nur.info$NURSERY %in% trainSetBP])
+  gid.valid <- pheno$GID[pheno$BP %in% validSetBP]
+  genoBP=geno[c(gid.train,gid.valid),]
+  phenoBP=pheno[match(c(gid.train,gid.valid),pheno$GID),]
+  ## select the set of traits with more than 50 observations 
+  traits.50obs <- traits[which(colSums(!is.na(phenoBP[,traits])) > 50)]
+  
+  for(tr in traits.50obs){
+    gid.train.tr <- intersect(gid.train, phenoBP$GID[!is.na(phenoBP[, tr])])
+    gid.valid.tr <- intersect(gid.valid, phenoBP$GID[!is.na(phenoBP[, tr])])
+    #values <- calcRel(gid.train.tr, gid.valid.tr, GRM)
+    Rdist <- RogerDistance(geno1=geno[gid.train.tr,], geno2=geno[gid.valid.tr,])
+    df <- data.frame(trainSetBP=trainSetBP,
+                     validSetBP=validSetBP,
+                     scenario="acBP_NUR",
+                     trait=tr,
+                     Roger_distance=Rdist,
+                     nb.genos.TS=length(gid.train.tr),
+                     nb.genos.VS=length(gid.valid.tr)#,
+                     # quantiles=names(values),
+                     # values=as.numeric(values)
+    )
+    acBP_NUR <- plyr::rbind.fill(acBP_NUR, df)
+    rm(df)
+  }
+}
+#calcRels <- plyr::rbind.fill(calcRels, acBP_NUR)
+
+```
+
+
+
+## acAllBP scenario
+
+acAllBP: across BP but using data from all other breeding program in the training set: NDSU + SDSU + URN/URSN -> MSU for example.
+
+
+```{r gp-acAllBP}
+acAllBP <- data.frame()
+for(bp in BPs){
+  ## training set: all other breeding program /data
+  gid.train <- pheno$GID[!pheno$BP %in% bp]
+  gid.valid <- pheno$GID[pheno$BP %in% bp]
+  ## mask the phenotype traits as NA for the validation set
+  ## select the set of traits with more than 50 observations
+  traits.50obs <- traits[which(colSums(!is.na(phenoBP[,traits])) > 50)]
+  for(tr in traits.50obs){
+    gid.train.tr <- intersect(gid.train, pheno$GID[!is.na(pheno[, tr])])
+    gid.valid.tr <- intersect(gid.valid, pheno$GID[!is.na(pheno[, tr])])
+    #values <- calcRel(gid.train.tr, gid.valid.tr, GRM)
+    Rdist <- RogerDistance(geno1=geno[gid.train.tr,], geno2=geno[gid.valid.tr,])
+    df <- data.frame(trainSetBP="AllOtherBP",
+                     validSetBP=bp,
+                     scenario="acAllBP",
+                     trait=tr,
+                     Roger_distance=Rdist,
+                     nb.genos.TS=length(gid.train.tr),
+                     nb.genos.VS=length(gid.valid.tr)
+    )
+    acAllBP <- plyr::rbind.fill(acAllBP, df)
+  }
+}
+calcRels <- plyr::rbind.fill(calcRels, acAllBP)
+```
+
+
+
+
+## nursBP scenario
+
+nursBP: training using nursery genotypes from the breeding program to be predicted.
+
+```{r gp-nursBP}
+nursBP <- data.frame()
+for(bp in BPs[!BPs %in% "NUR"]){
+  
+  ## validation set: each individual BP (no nursery)
+  gid.valid <- pheno$GID[pheno$BP %in% bp]
+  ## training set: NUR BP
+  gid.train <- intersect(gid.nur, nur.info$GID[nur.info$SOURCE %in% bp])
+  phenoBP <- pheno[match(c(gid.train, gid.valid), pheno$GID),] 
+  ## mask the phenotype traits as NA for the validation set
+  ## select the set of traits with more than 50 observations
+  traits.50obs <- traits[which(colSums(!is.na(phenoBP[,traits])) > 50)]
+  
+  for(tr in traits.50obs){
+    gid.train.tr <- intersect(gid.train, phenoBP$GID[!is.na(phenoBP[, tr])])
+    gid.valid.tr <- intersect(gid.valid, phenoBP$GID[!is.na(phenoBP[, tr])])
+    if(length(gid.train.tr) > 50 &length(gid.valid.tr) >50){
+      
+      # values <- calcRel(gid.train.tr, gid.valid.tr, GRM)
+      # mostRel <- getMostRel(rel.mat=GRM[gid.train.tr, gid.valid.tr], thresh.val=values["90%"])
+      # mostRel[order(mostRel[,1], decreasing = T)[1:20],, drop=F]
+      Rdist=RogerDistance(geno1=geno[gid.train.tr,], geno2=geno[gid.valid.tr,])
+      df <- data.frame(trainSetBP=paste0("NUR-",bp),
+                       validSetBP=bp,
+                       scenario="nursBP",
+                       trait=tr,
+                       Roger_distance=Rdist,
+                       nb.genos.TS=length(gid.train.tr),
+                       nb.genos.VS=length(gid.valid.tr)
+                       # quantiles=names(values),
+                       # values=as.numeric(values)
+      )
+      nursBP <- plyr::rbind.fill(nursBP, df)
+    }
+  }
+}
+calcRels <- plyr::rbind.fill(calcRels, nursBP)
+```
+
+
+# Combine results
+
+```{r}
+table(calcRels$scenario)
+summary(calcRels$nb.genos.TS)
+p2f <- here("output",paste0("genom-pred_all-scenarios_genetic-relatedness_Rdist.tsv"))
+write.table(calcRels,file=p2f, sep="\t", row.names=FALSE)
+## summary for median
+calcRels |>
+  #filter(quantiles %in% "50%") |> 
+  group_by(scenario, validSetBP) |> 
+  summarize(Rdist=mean(Roger_distance, na.rm=T),.groups="drop")
+
+# all.res.list <- list(gp.wBP, gp.acBP, gp.acAllBP, gp.nursBP, #gp.TSopti,
+#                      gp.wTPE,gp.acTPE)
+# lapply(all.res.list, dim)
+# all.res <- plyr::rbind.fill(all.res.list)
+# table(all.res$scenario)
+# p2f <- here("output",paste0("genom-pred_",length(all.res.list),"-scenarios_",meth,
+#                             "-method_BPs_pred-ab.tsv"))
+# write.table(all.res,file=p2f, sep="\t", row.names=FALSE)
+```
+
+
+# Study genetic relatedness
+
+## Heatmap by trait
+
+```{r}
+head(calcRels)
+
+calcRels |> 
+  #filter(quantiles == "50%", scenario %in% "acBP") |> 
+  filter(scenario %in% "acBP") |> 
+  ggplot(aes(x=trainSetBP, y=validSetBP, fill=Roger_distance))+
+  facet_wrap(~trait, scales="free")+
+  geom_tile()+
+  scale_fill_viridis_c(option="C")+
+  theme_minimal()
+```
+## Points by prediction scenario
+
+```{r}
+calcRels |> 
+  filter(!scenario %in% c("nursBP"), trait %in% "VSK") |> 
+  #mutate(quantile=as.integer(gsub("%","",quantiles))) |>
+  #mutate(quantiles=forcats::fct_reorder(quantiles, quantile)) |>
+  ggplot(aes(x=validSetBP, y=Roger_distance, color=trainSetBP))+
+  geom_point(size=2)+
+  facet_wrap(~scenario)+
+  labs(x="Validation set breeding program",
+       y="Roger's distance",
+       color="Training set breeding program")+
+  #guides(color=guide_colorbar(barwidth=10,label.position="bottom"))+
+  theme_minimal(base_size=13)+
+  #scale_color_viridis_d(end = 0.9)+
+  guides(color=guide_legend(nrow=2))+
+  #scale_colour_steps(n.breaks = 11)+
+  #scale_color_viridis_c(end = 0.9)+
+  theme(legend.position="bottom",
+        legend.title.position="top",
+        legend.text=element_text(margin=margin(r=0.1)),
+        strip.text = element_text(size=14))
+ggsave(here("output","figures",
+            "GP-genetic-relatedness-Rdist_all-scenarios_VSK.png"),
+       width=9, height=6, scale=0.8)
+```
+
+Genetic relatedness between nursery and breeding programs
+
+
+```{r}
+calcRels |> 
+  #filter(trait %in% "VSK", scenario %in% "acBP", trainSetBP %in% "NUR") |> 
+  filter( scenario %in% "acBP", trainSetBP %in% "NUR") |> 
+  # mutate(quantile=as.integer(gsub("%","",quantiles))) |>
+  # mutate(quantiles=forcats::fct_reorder(quantiles, quantile)) |>
+  ggplot(aes(x=validSetBP, y=Roger_distance,color=trait))+#, color=quantiles))+
+  geom_point(size=2)+
+  labs(x="Validation set breeding program",
+       y="Genetic relatedness value",
+       color="Genetic relatedness quantiles")+
+  #guides(color=guide_colorbar(barwidth=10,label.position="bottom"))+
+  theme_minimal(base_size=13)+
+  #scale_color_viridis_d(end = 0.9)+
+  guides(color=guide_legend(nrow=2))+
+  theme(legend.position="bottom",
+        legend.title.position="top",
+        legend.text=element_text(margin=margin(r=0.1)))
+## average across traits
+dat2plot <- calcRels |> 
+  filter(scenario %in% c("acBP","nursBP")) |>
+  filter(grepl("NUR", trainSetBP)) |>
+  group_by(scenario,validSetBP) |> 
+  summarize(Roger_distance=mean(Roger_distance, na.rm=T), .groups="drop")
+
+# dat2plot <- calcRels |> 
+#   filter(trait %in% "VSK", scenario %in% "acBP",trainSetBP %in% "NUR") |> 
+#   bind_rows(
+#     calcRels |> 
+#       filter(trait %in% "VSK", scenario %in% "nursBP")
+#   ) |>
+#   mutate(scenario=recode(scenario,
+#                          "acBP"="NURS",
+#                          "nursBP"="NURS from BP"))
+ggplot(dat2plot,aes(x=scenario, y=Roger_distance, color=validSetBP, group=validSetBP))+
+  geom_point(size=2)+
+  scale_x_discrete(labels=scales::label_wrap(10))+
+  labs(x="Training set",
+       y="Roger's distance",
+       color="Training set BP")+
+  theme_bigstatsr(size.rel=0.8)+
+  geom_line()+
+  guides(color=guide_legend(nrow=2))+
+  theme(legend.position="bottom",
+        legend.title.position="top",
+        legend.text=element_text(margin=margin(r=0.1)))
+ggsave(here("output","figures",
+            "GP-genetic-relatedness-Rdist_NURS_vs_NURS-from-BP_VSK.png"),
+       width=9, height=6, scale=0.8)
+
+ggplot(dat2plot, aes(x=validSetBP, y=Roger_distance, fill=scenario, group=scenario))+
+  geom_col(position="dodge",alpha=0.8)+
+  labs(x="Validation set breeding program",
+       y="Roger's distance",
+       color="Training set scenario")+
+  scale_fill_manual(values = c("acBP"="dodgerblue", "nursBP"="gold2"),
+                    label=c("NUR-all","NUR-BP"))+
+  theme_bigstatsr(size.rel=0.8)+
+  theme(legend.position="bottom",
+        legend.title.position="top",
+        panel.grid.major.x = element_blank())
+ggsave(here("output","figures",
+            "GP-genetic-relatedness-Rdist_NURS_vs_NURS-from-BP.png"),
+       width=9, height=6, scale=0.8)
+```
+
+## Genetic distance between breeding programs
+
+```{r}
+## average across traits
+dat2plot <- calcRels |> 
+  filter(scenario %in% c("acBP")) |>
+  filter("NUR" != trainSetBP) |> 
+  filter("NUR" != validSetBP) |>
+  group_by(trainSetBP,validSetBP) |> 
+  summarize(Roger_distance=mean(Roger_distance, na.rm=T), .groups="drop") |> 
+  ## set as NA lower triangle 
+  mutate(Roger_distance=ifelse(trainSetBP > validSetBP, NA, Roger_distance))
+
+
+
+ggplot(dat2plot, aes(x=trainSetBP, y=validSetBP, fill=Roger_distance)) +
+  geom_tile(color="white")+
+  scale_fill_viridis_c(option="C", na.value = NA)+
+  theme_bigstatsr(size.rel=0.8) +
+  labs(x="Breeding program", y="Breeding program", fill="Roger's distance")+
+  scale_x_discrete(position = "top")+
+  #scale_y_discrete(sec.axis = dup_axis())
+  theme(legend.position="inside",
+        legend.position.inside=c(0.75,0.25),
+        legend.background = element_rect(color="grey50"))
+ggsave(here("output","figures",
+            "GP-genetic-relatedness-mean-Rdist_acBP_BPs.png"),
+       width=6, height=5, scale=0.8)
+```
+
+
+## Genetic distance for URN and URSN separately
+
+```{r}
+acBP_NUR |> 
+  group_by(trainSetBP, validSetBP) |> 
+  filter(!validSetBP %in% "NUR") |> 
+  summarize(meanRdist=mean(Roger_distance, na.rm=T)) |> 
+  ggplot(aes(x=validSetBP, y=meanRdist, fill=trainSetBP))+
+  geom_col(position="dodge")+
+  labs(x="Validation set breeding program",
+       y="Roger's distance",
+       color="Training set nursery")+
+  theme_minimal(base_size=13)+
+  guides(color=guide_legend(nrow=2))+
+  theme(legend.position="bottom",
+        legend.title.position="top",
+        legend.text=element_text(margin=margin(r=0.1)))
+ggsave(here("output","figures",
+            "GP-genetic-relatedness-Rdist_URN-vs-URSN_BP.png"),
+       width=9, height=6, scale=0.8)
+```
+
+# Genetic contribution URN/URSN
+
+
+```{r}
+library(nnls)
+
+## released cultivar
+cult <- c("NUR-731")
+
+gid.urn <- nur.info$GID[nur.info$NURSERY %in% "URN" & !nur.info$GID %in% cult]
+gid.ursn <- nur.info$GID[nur.info$NURSERY %in% "URSN" & !nur.info$GID %in% cult]
+
+A <- t(geno.sc[c(gid.urn, gid.ursn),])
+# A.urn <- colMeans(geno.sc[gid.urn, ]) # Unique URN signature
+# A.ursn <- colMeans(geno.sc[gid.ursn, ]) # Unique URSN signature
+# A.oth <- rep(0, ncol(geno.sc))         # Unexplained Background (All Zeros)
+## Combine the signatures into a matrix
+
+#A <- cbind(A.urn, A.ursn, A.oth)
+Y <- geno.sc[cult,]
+
+
+# 3. Apply the Sum-to-One Constraint Trick across all individuals
+weight <- 10000
+A_constrained <- rbind(A, rep(weight, ncol(A)))
+Y_constrained <- c(Y, weight)
+
+reg_result <- nnls(A_constrained, Y_constrained)
+individual_weights <- reg_result$x
+names(individual_weights) <- c(gid.urn, gid.ursn)
+
+## Aggregate the weights by Set
+(urn_contribution <- sum(individual_weights[gid.urn]))
+(ursn_contribution <- sum(individual_weights[gid.ursn]))
+picked_parents <- individual_weights[individual_weights > 0.01]
+print(sort(picked_parents, decreasing = TRUE)[1:5])
+```
+
+
+
+
+
+# Appendix
+
+```{r info}
+t1 <- proc.time(); t1 - t0
+print(sessionInfo(), locale=FALSE)
+```
+
+

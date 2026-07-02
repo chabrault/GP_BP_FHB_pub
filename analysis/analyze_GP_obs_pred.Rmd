@@ -1,0 +1,286 @@
+---
+title: "Analyze genomic prediction results"
+author: Charlotte Brault
+output: html_document
+date: '`r format(Sys.time(), "%d %B, %Y")`'
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Libraries
+
+```{r load libraries}
+suppressPackageStartupMessages(library(here)) # root directory
+suppressPackageStartupMessages(library(data.table)) # load data
+suppressPackageStartupMessages(library(apercu)) # ap
+suppressPackageStartupMessages(library(dplyr)) # formatting
+suppressPackageStartupMessages(library(knitr)) # table display
+suppressPackageStartupMessages(library(ggplot2)) # plot
+suppressPackageStartupMessages(library(janitor)) # formatting
+suppressPackageStartupMessages(library(purrr)) # handle lists
+suppressPackageStartupMessages(library(paletteer)) # color palette
+suppressPackageStartupMessages(library(bigstatsr)) # theme
+suppressPackageStartupMessages(library(gtsummary)) # summary tables
+suppressPackageStartupMessages(library(gtExtras)) # summary tables
+suppressPackageStartupMessages(library(ggpubr)) # nice plots
+suppressPackageStartupMessages(library(patchwork)) # combine plots
+suppressPackageStartupMessages(library(cowplot)) # combine plots
+library(HRSWGS)
+```
+
+
+# Set up root directory
+
+```{r current dir}
+here::i_am("analysis/analyze_GP_obs_pred.Rmd")
+```
+
+
+This R chunk is used to assess how much time it takes to execute the R code in this document until the end:
+
+```{r time_0}
+t0 <- proc.time()
+```
+
+```{r}
+trait.pal <- c(
+  "DIS"="#F99D53FF",
+  "VSK"="#4F5791FF",
+  "DON"="#D40F7DFF"
+)
+traits <- names(trait.pal)
+```
+
+
+# Load predicted values
+
+```{r load_pred}
+scenarios <- c("wBP","acBP","acAllBP","nursBP")
+p2fs <- here("output","genom_pred",paste0("observed-vs-predicted_",scenarios,"_GBLUP.rds"))
+file.mtime(p2fs)
+names(p2fs) <- scenarios
+all.pred <- map(p2fs, readRDS) 
+#ap(all.pred)
+```
+
+
+
+# Obs: pred by scenario
+
+Conceive one color scale to apply to all the plots:
+
+## wBP
+
+```{r wBP-plot-res}
+BP.lvls <- c("NUR","MN","ND","SD","MT") 
+
+cols <- c("MN"="#7a0019","ND"="#2E8B57","SD"="#3A5FCD","MT"="#bd9b04",
+          "OTHER"="grey50","AAFC-CA"="#43AABA","PRIVATE"="#8A42C9")
+#ap(all.pred$wBP)
+wBP <- bind_rows(all.pred$wBP, .id="BP") |> 
+  mutate(rep=as.character(rep))
+table(wBP$trainSetBP)
+ggplot(wBP, aes(x=obs, y=pred))+
+  facet_grid(trait~trainSetBP, scales="free")+
+  geom_point(size=0.5, alpha=0.5)+
+  geom_abline(slope=1, intercept=0, color="grey80", linewidth=0.5)+
+  theme_bigstatsr(size.rel=0.8)+
+  stat_cor(method="pearson", size=3, aes(label=after_stat(r.label)), color="grey30", geom="label")+
+  theme(panel.grid=element_blank())
+ggsave(here("output","figures","GP-obs-vs-pred_wBP.png"),width=7,height=5,scale=0.85)
+```
+
+Predictive ability RKHS for wBP
+```{r wBP-plot-res-RKHS}
+obs.pred.wBP <- readRDS(here("output","genom_pred","observed-vs-predicted_wBP_RKHS.rds"))$MT
+obs.pred.wBP |>  
+  group_by(trait) |> 
+  summarize(corP=round(cor(obs,pred),3), n=n(), .groups="drop") 
+```
+
+
+
+## acBP
+
+```{r acBP_res}
+acBP <- bind_rows(all.pred$acBP) |> 
+  rename(validSetBP=BP) |> 
+  mutate(trainSetBP=factor(trainSetBP, levels=BP.lvls),
+         validSetBP=factor(validSetBP, levels=BP.lvls),
+         trait=factor(trait, levels=traits))
+## full results
+p.acBP <- acBP |> 
+  filter(!trainSetBP %in% "NUR" & !validSetBP %in% "NUR") |> 
+  droplevels() |> 
+  ggplot(aes(x=obs, y=pred, color=trainSetBP))+
+  facet_grid(trait~validSetBP, scales="free", labeller=label_both)+
+  geom_point(size=0.5, alpha=0.5)+
+  geom_abline(slope=1, intercept=0, color="grey80", linewidth=0.5)+
+  theme_bigstatsr(size.rel=0.8)+
+  scale_color_manual(values=cols)+
+  guides(color=guide_legend(title="Training set", override.aes = list(alpha=1, size=2)))+
+  stat_cor(method="pearson", size=3, aes(label=after_stat(r.label)), color="grey30", geom="label")+
+  theme(panel.grid=element_blank())
+plot(p.acBP)
+ggsave(here("output","figures","GP-obs-vs-pred_acBP.png"),width=7,height=5,scale=0.85)
+#ggsave(here("output","figures","GP-heatmap_acBP-corP_all.png"),width=7,height=4,scale=0.85)
+
+## only with NURSERY as training set
+p.acBP.nur <- acBP |> 
+  filter(trainSetBP == "NUR") |> 
+  droplevels() |> 
+  ggplot(aes(x=obs, y=pred))+
+  facet_grid(trait~validSetBP, scales="free")+
+  geom_point(size=0.5, alpha=0.5)+
+  geom_abline(slope=1, intercept=0, color="grey80", linewidth=0.5)+
+  theme_bigstatsr(size.rel=0.8)+
+  stat_cor(method="pearson", size=3, aes(label=after_stat(r.label)), color="grey30", geom="label")+
+  theme(panel.grid=element_blank())
+plot(p.acBP.nur)
+ggsave(here("output","figures","GP-obs-vs-pred_wholeNUR.png"),width=7,height=5,scale=0.85)
+```
+
+Check the change of ranking of the predicted values when changing the training set?
+
+```{r}
+acBP |> 
+  filter(!trainSetBP %in% "NUR" & !validSetBP %in% "NUR") |> 
+  group_by(GID, trait, validSetBP, obs) |> 
+  summarize(pred=mean(pred), .groups="drop") |>
+  ggplot(aes(x=obs, y=pred, color=validSetBP))+
+  geom_point(size=0.5, alpha=0.5)+
+  facet_wrap(~trait)+
+  stat_cor(method="pearson", size=3, aes(label=after_stat(r.label)),geom="label")
+```
+
+
+## acAllBP
+
+```{r}
+
+acAllBP <- bind_rows(all.pred$acAllBP) |> 
+  mutate(validSetBP=factor(validSetBP, levels=BP.lvls),
+         trait=factor(trait, levels=traits)) 
+acAllBP |> 
+  ggplot(aes(x=obs, y=pred, color=validSetBP))+
+  facet_wrap(~trait, scales="free")+
+  geom_point(size=0.5, alpha=0.5)+
+  geom_abline(slope=1, intercept=0, color="grey80", linewidth=0.5)+
+  theme_bigstatsr(size.rel=0.8)+
+  scale_color_manual(values=cols) +
+  guides(color=guide_legend(title="Validation set", override.aes = list(alpha=1, size=2)))+
+  geom_smooth(method="lm", se=FALSE, linewidth=0.5)+
+  stat_cor(method="pearson", size=3, aes(label=after_stat(r.label)))+
+  theme(panel.grid=element_blank())
+ggsave(here("output","figures","GP-obs-vs-pred_acAllBP.png"),width=7,height=5,scale=0.85)
+
+```
+
+
+## nursBP
+
+```{r}
+nursBP <- bind_rows(all.pred$nursBP) |> 
+  mutate(validSetBP=factor(validSetBP, levels=BP.lvls),
+         trait=factor(trait, levels=traits))
+nursBP |>
+  ggplot(aes(x=obs, y=pred, color=validSetBP))+
+  facet_wrap(~trait, scales="free")+
+  geom_point(size=0.5, alpha=0.5)+
+  geom_abline(slope=1, intercept=0, color="grey80", linewidth=0.5)+
+  theme_bigstatsr(size.rel=0.8)+
+  scale_color_manual(values=cols) +
+  guides(color=guide_legend(title="Validation set", override.aes = list(alpha=1, size=2)))+
+  geom_smooth(method="lm", se=FALSE, linewidth=0.5)+
+  stat_cor(method="pearson", size=3, aes(label=after_stat(r.label)))+
+  theme(panel.grid=element_blank())
+ggsave(here("output","figures","GP-obs-vs-pred_nursBP.png"),width=7,height=5,scale=0.85)
+```
+
+
+# Predictive ability by breeding cohort for NUR-all
+
+Get the genotype information = breeding cohort
+```{r}
+
+p2f <- here("data","inputs_GP_BP_FHB.rds")
+dat <- readRDS(p2f)
+geno.info <- dat$geno.info
+purrr::map_dbl(geno.info, n_distinct)
+```
+
+
+
+```{r}
+NUR <- acBP |> filter(trainSetBP %in% "NUR") |> 
+  left_join(geno.info |> select(GID, firstYear), by="GID")
+## NUR-all predictive ability
+PA.NUR.all <- NUR |> group_by(trait, validSetBP) |> 
+  summarize(corP=round(cor(obs,pred),3), n=n(), .groups="drop") |>
+  mutate(param=validSetBP)
+PA.NUR.co <- NUR |> group_by(trait, validSetBP, firstYear) |> 
+  summarize(corP=round(cor(obs,pred),3), n=n(), .groups="drop") |> 
+  filter(n > 30) |> mutate(param=paste0("BP-",firstYear))
+PA.NUR <- bind_rows(PA.NUR.all, PA.NUR.co) 
+
+```
+
+
+```{r}
+library(forcats)
+cols.tmp <- c("MN"="#7a0019","ND"="#2E8B57","SD"="#3A5FCD","MT"="#bd9b04")
+cols.tmp <- c(cols.tmp, paletteer::paletteer_c("oompaBase::greyscale", n=9, direction = -1))
+names(cols.tmp) <- c(names(cols.tmp)[1:4], paste0("BP-",seq(2017,2025, by=1)))
+
+PA.NUR |> filter(!validSetBP %in% "ND") |> 
+  mutate(TS.def=as.character(fct_recode(param, "BP"="MN","BP"="ND","BP"="SD","BP"="MT"))) |>
+  ggplot(aes(x=corP, y=TS.def, fill=param))+
+  facet_grid(validSetBP ~ trait) +
+  facet_grid(validSetBP~trait, scales="fixed")+
+  labs(x="Pearson correlation",y="Validation set")+
+  geom_col(position=position_dodge(0.9))+
+  theme_bigstatsr(size.rel=0.8)+
+  scale_x_continuous(breaks = seq(-0.4,0.5,by=0.2))+
+  scale_fill_manual(values=cols.tmp, name="Validation set composition")+
+  theme(legend.position="none")
+ggsave(here("output","figures","GP-acBP-scenarios_predict-by-cohort.png"),
+       width=7,height=5,scale=0.85)
+```
+
+
+
+# Correlation between predicted values for NUR
+
+```{r}
+NUR.all <- bind_rows(all.pred$acBP)  |> 
+  filter(trainSetBP %in% "NUR") |> 
+  rename(validSetBP=BP) |>
+  select (-obs, -GP.method, -trainSetBP) |> 
+  mutate(scenario="NUR-all")
+NUR.BP <- bind_rows(all.pred$nursBP) |> 
+  select(-obs, -GP.method) |> mutate(scenario="NUR-BP")
+pred.df <- bind_rows(NUR.all, NUR.BP) |> 
+  tidyr::pivot_wider(names_from=scenario, values_from=pred) 
+pred.df 
+pred.df |> 
+  ggplot(aes(x=`NUR-all`, y=`NUR-BP`))+
+  facet_wrap(~trait, scales="free")+
+  geom_point(size=0.5, alpha=0.5)+
+  geom_abline(slope=1, intercept=0, color="grey80", linewidth=0.5)+
+  theme_bigstatsr(size.rel=0.8)+
+  geom_smooth(method="lm", se=FALSE, linewidth=0.5)+
+  stat_cor(method="pearson", size=3, aes(label=after_stat(r.label)))+
+  theme(panel.grid=element_blank())
+
+```
+
+# Appendix
+
+```{r info}
+t1 <- proc.time(); t1 - t0
+print(sessionInfo(), locale=FALSE)
+```
+
+

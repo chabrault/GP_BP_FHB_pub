@@ -9,3 +9,12 @@ analysis/*png
 analysis/*html
 analysis/*_cache
 analysis/site_libs
+*.html
+docs/site_libs
+output/figures/*png
+docs/figure*
+docs/figure
+output/genom_pred/temp
+*.dat
+.positai
+

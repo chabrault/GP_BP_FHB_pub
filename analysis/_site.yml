@@ -1,7 +1,7 @@
-name: "GP_BP_FHB"
+name: "Genomic prediction in breeding programs for Fusarium head blight resistance"
 output_dir: ../docs
 navbar:
-  title: "GP_BP_FHB"
+  title: "Genomic prediction in breeding programs for Fusarium head blight resistance"
   left:
   - text: Home
     href: index.html

@@ -1,5 +1,5 @@
 ---
-title: "Home"
+title: "Home Genomic Prediction FHB Breeding Programs"
 site: workflowr::wflow_site
 output:
   workflowr::wflow_html:
@@ -8,4 +8,39 @@ editor_options:
   chunk_output_type: console
 ---
 
-Welcome to my research website.
+# Input data
+
+- [Explore input data](explore_geno-pheno_BP.html). In this script, we load phenotype and genotype data and we explore the experimental design, genotype composition, genotypic and phenotypic distribution across breeding programs. Generate figures for the genetic structure, phenotypic summary, and phenotypic distribution.
+
+
+```{r, echo=FALSE, out.width = '70%', fig.cap='Genetic structure PCA breeding programs'}
+knitr::include_graphics("../output/figures/PCA_inds_geno_NUR-all-BPs.png", error = FALSE)
+```
+
+- [Extract genetic relationship between prediction scenarios](extract_gen-rel_prediction-scenario.html). In this script, we estimate the genetic relatedness between the training and the testing sets for the different prediction scenarios. We compare the Roger's distance between the scenarios.
+
+```{r, echo=FALSE, out.width = '70%', fig.cap='Genetic distance between training and validation sets for the NURS vs. NURS-from-BP scenarios'}
+knitr::include_graphics("../output/figures/GP-genetic-relatedness-Rdist_NURS_vs_NURS-from-BP_VSK.png", error = FALSE)
+```
+
+
+# Run predictions
+
+- [Genomic prediction scenarios](genom_pred_btw-BP.html). In this script, we load input data and perform genomic prediction analyses. We compare the results of different genomic prediction scenarios, which differ in the training sets.
+
+
+# Analysis of genomic prediction results
+
+- [Analyze genomic prediction results](analyze_genom_pred.html). In this script, we analyze the results of the genomic prediction analyses. We compare the results of different genomic prediction scenarios, make plots, and perform statistical tests.
+
+
+```{r, echo=FALSE, out.width = '70%', fig.cap='Compare prediction scenarios'}
+knitr::include_graphics("../output/figures/GP-heatmap_3-scenarios-corP.png", error = FALSE)
+```
+
+
+
+- [Compare observed vs. predicted values](analyze_GP_obs_pred.html). In this script, we compare observed vs. predicted values for each genomic prediction scenario to get more insights about the predicted values.
+
+
+

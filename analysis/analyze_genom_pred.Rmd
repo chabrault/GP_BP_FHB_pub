@@ -1,0 +1,1391 @@
+---
+title: "Analyze genomic prediction results"
+author: Charlotte Brault
+output: html_document
+date: '`r format(Sys.time(), "%d %B, %Y")`'
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Libraries
+
+```{r load libraries}
+suppressPackageStartupMessages(library(here)) # root directory
+suppressPackageStartupMessages(library(data.table)) # load data
+suppressPackageStartupMessages(library(apercu)) # ap
+suppressPackageStartupMessages(library(dplyr)) # formatting
+suppressPackageStartupMessages(library(knitr)) # table display
+suppressPackageStartupMessages(library(ggplot2)) # plot
+suppressPackageStartupMessages(library(janitor)) # formatting
+suppressPackageStartupMessages(library(purrr)) # handle lists
+suppressPackageStartupMessages(library(paletteer)) # color palette
+suppressPackageStartupMessages(library(viridis)) # color palette
+suppressPackageStartupMessages(library(bigstatsr)) # theme
+suppressPackageStartupMessages(library(gtsummary)) # summary tables
+suppressPackageStartupMessages(library(gtExtras)) # summary tables
+suppressPackageStartupMessages(library(patchwork)) # combine plots
+suppressPackageStartupMessages(library(cowplot)) # combine plots
+suppressPackageStartupMessages(library(forcats)) # manage factors
+suppressPackageStartupMessages(library(latex2exp)) # manage legend n bar
+
+library(HRSWGS)
+```
+
+
+# Set up root directory
+
+```{r current dir}
+here::i_am("analysis/analyze_genom_pred.Rmd")
+```
+
+
+This R chunk is used to assess how much time it takes to execute the R code in this document until the end:
+
+```{r time_0}
+t0 <- proc.time()
+```
+
+```{r}
+trait.pal <- c(
+  "DIS"="#F99D53FF",
+  "VSK"="#4F5791FF",
+  "DON"="#D40F7DFF"
+)
+
+```
+
+
+# Load results
+
+* Predictions generated in `genom_pred_btw-BP.Rmd`.
+
+```{r load_results}
+#p2f <- here("output","genom-pred_6-scenarios-BPs_pred-ab.tsv")
+meth <- "GBLUP"
+# nscenarios <- 6
+suf <- ""
+
+# p2f <- here("output",paste0("genom-pred_",nscenarios,"-scenarios_",
+#                             meth,"-method_BPs_pred-ab.tsv"))
+
+p2f <- here("output",paste0("genom-pred_all-scenarios_",meth,
+                            "-method_BPs_pred-ab",suf,".tsv"))
+file.mtime(p2f)
+all.res <- fread(p2f)
+table(all.res$scenario)
+head(all.res)
+all.res <- all.res |> filter(!(scenario %in% "wBP" & trainSetBP %in% "NUR"))
+## order the traits: first agro, FHB and wheat qual
+unique(all.res$trait)
+trait.lvl <- c("DIS","VSK","DON")
+stopifnot(all(all.res$trait %in% trait.lvl))
+all.res$trait <- factor(all.res$trait, levels=trait.lvl)
+traits <- levels(all.res$trait)
+```
+
+
+* Genetic relatedness and size of training/testing sets
+```{r}
+p2f <- here("output",paste0("genom-pred_all-scenarios_genetic-relatedness_Rdist.tsv"))
+file.mtime(p2f)
+genRel <- fread(p2f)
+```
+
+
+* full input data, to get the fitting summary
+
+```{r}
+## load fitting summary
+p2f <- here("data","inputs_GP_BP_FHB.rds")
+file.mtime(p2f)
+tools::md5sum(p2f)
+dat <- readRDS(p2f)
+```
+
+
+# Summary statistics
+
+```{r}
+# gtsummary::tbl_summary(
+#   data=all.res |> filter(!is.na(corP)),
+#   by = scenario,
+#   include = c(corP, nb.genos.TS, nb.genos.VS),
+#   statistic = list(
+#     corP ~ c("{mean} ({sd})", "{min} - {max}"),
+#     nb.genos.TS ~ c("{mean} ({sd})", "{min} - {max}"),
+#     nb.genos.VS ~ c("{mean} ({sd})", "{min} - {max}")
+#   )#,
+#   #digits = all.res ~ 3
+# ) |>
+#   as_gt() |>
+#   gtExtras::gt_theme_538() |>
+#   gt::gtsave(filename = here("output","tables","GP-summary-stats_by-scenario-corP.png"))
+```
+
+```{r}
+gtsummary::tbl_summary(
+  data=all.res |> filter(!is.na(corP)),
+  by = scenario,
+  include = c(scenario, corP),
+  type = all_continuous() ~ "continuous2",
+  statistic = all_continuous() ~ c("{median} ({p25}, {p75})", "{min}, {max}")
+  
+)
+```
+
+
+
+# Results by scenario
+
+Conceive one color scale to apply to all the plots:
+
+## wBP
+
+```{r wBP-plot-res}
+BP.lvls <- c("NUR","MN","ND","SD","MT") 
+p.wBP <- all.res |>
+  filter(scenario %in% "wBP") |> #, !trainSetBP %in% "NUR") |> 
+  group_by(trait, trainSetBP,nb.genos.TS, nb.genos.VS) |> 
+  summarize(corP=mean(corP),.groups="drop") |> 
+  mutate(trainSetBP=factor(trainSetBP, levels=BP.lvls),
+         trait=factor(trait, levels=traits)) |> 
+  ggplot(aes(x=trainSetBP, y=trait,fill=corP, label=round(corP,2)))+
+  geom_tile(show.legend=F, color="white", linewidth=0.8) +
+  scale_fill_gradientn(
+    colours = c("red","orange","yellow","greenyellow","forestgreen"),
+    limits=c(0,1),na.value = "grey80")+
+  #scale_fill_viridis_c() +
+  labs(x="Validation Set",y="Trait", title="Scenario: within breeding program")+
+  geom_label(fill="white", linewidth=0,alpha=0.4,size=4) +
+  bigstatsr::theme_bigstatsr(size.rel=0.8)+
+  theme(panel.grid=element_blank(),
+        axis.text = element_text(size=rel(1.1)))
+plot(p.wBP)
+ggsave(here("output","figures",paste0("GP-heatmap_wBP-corP.png")),
+       width=6,height=6,scale=0.8)
+```
+
+
+Run some statistics
+```{r}
+## mean predictive ability by trait
+all.res |> filter(scenario %in% "wBP") |>
+  group_by(trait) |>
+  summarize(mean_corP=round(mean(corP),3),
+            sd_corP=round(sd(corP),3),
+            nb.genos.TS=mean(nb.genos.TS),
+            nb.genos.VS=mean(nb.genos.VS),
+            .groups="drop") |>
+  # arrange(desc(mean_corP)) |> 
+  print_table()
+
+## average predictive ability by breeding program
+all.res |> filter(scenario %in% "wBP") |>
+  group_by(trainSetBP) |>
+  summarize(mean_corP=round(mean(corP),3),
+            sd_corP=round(sd(corP),3),,
+            nb.genos.TS=mean(nb.genos.TS),
+            nb.genos.VS=mean(nb.genos.VS),
+            .groups="drop") |>
+  arrange(desc(mean_corP)) |> 
+  print_table()
+```
+
+
+<!-- ```{r} -->
+<!-- all.res |> -->
+<!--   filter(scenario %in% "wBP.co") |> #, !trainSetBP %in% "NUR") |>  -->
+<!--   group_by(trait, trainSetBP, cohort.valid) |>  -->
+<!--   summarize(corP=mean(corP),.groups="drop") |>  -->
+<!--   mutate(trainSetBP=factor(trainSetBP, levels=BP.lvls), -->
+<!--          trait=factor(trait, levels=traits)) |>  -->
+<!--   ggplot(aes(x=trainSetBP, y=trait,fill=corP, label=round(corP,2)))+ -->
+<!--   geom_tile(show.legend=F, color="white", linewidth=0.8) + -->
+<!--   scale_fill_gradientn( -->
+<!--     colours = c("red","orange","yellow","greenyellow","forestgreen"), -->
+<!--     limits=c(0,1),na.value = "grey80")+ -->
+<!--   #scale_fill_viridis_c() + -->
+<!--   labs(x="Validation Set",y="Trait", title="Scenario: within breeding program")+ -->
+<!--   geom_label(fill="white", linewidth=0,alpha=0.4,size=4) + -->
+<!--   bigstatsr::theme_bigstatsr(size.rel=0.8)+ -->
+<!--   theme(panel.grid=element_blank(), -->
+<!--         axis.text = element_text(size=rel(1.1))) -->
+<!-- plot(p.wBP) -->
+<!-- ``` -->
+
+
+
+## acAllBP
+
+```{r acAllBP}
+p.acAllBP <- all.res |> 
+  filter(scenario %in% "acAllBP", !validSetBP %in% "NUR") |> 
+  mutate(validSetBP=factor(validSetBP, levels=BP.lvls)) |>
+  ggplot(aes(y=trait, x=validSetBP,fill=corP, label=sprintf('%.2f', corP)))+
+  geom_tile(show.legend=F, color="white", linewidth=0.8)+
+  geom_label(fill="white", linewidth=0,alpha=0.5, size=4)+
+  scale_fill_gradientn(
+    colours = c("red","orange","yellow","greenyellow","forestgreen"),
+    limits=c(0,1),na.value = "grey80")+
+  theme_bigstatsr(size.rel=0.8)+
+  labs(y="Trait",x="Validation set", title="Scenario: Across all BP")+
+  theme(panel.grid=element_blank(),
+        axis.text = element_text(size=rel(1.1)))
+plot(p.acAllBP)
+ggsave(here("output","figures","GP-heatmap_acAllBP-corP.png"),
+       width=6,height=5,scale=0.8)
+```
+
+Run some statistics
+```{r}
+acAllBP <- all.res |> filter(scenario %in% "acAllBP") 
+summary(acAllBP$corP)
+acAllBP |> group_by(validSetBP) |> summarize(corP=mean(corP), .groups="drop") |> 
+  arrange(desc(corP)) |> print_table()
+```
+
+## acBP
+
+```{r acBP_res}
+## full results
+p.acBP <- all.res |> 
+  filter(scenario %in% "acBP") |>
+  mutate(trainSetBP=factor(trainSetBP, levels=BP.lvls),
+         validSetBP=factor(validSetBP, levels=BP.lvls),
+         trait=factor(trait, levels=traits)) |> 
+  filter(!trainSetBP %in% "NUR" & !validSetBP %in% "NUR") |> 
+  droplevels() |> 
+  ggplot(aes(y=trainSetBP, x=validSetBP,fill=corP, label=sprintf('%.2f', corP)))+
+  facet_wrap(~trait, nrow=1)+
+  geom_tile(show.legend=F, color="grey85", linewidth=0.8) +
+  theme_bigstatsr(size.rel=0.8)+
+  ## add lines around the tiles
+  geom_vline(xintercept = seq(1.5,3.5,by=1), color="grey80", linewidth=0.1)+
+  geom_hline(yintercept = seq(1.5,3.5,by=1), color="grey80", linewidth=0.1)+
+  #cowplot::theme_cowplot(font_size = 12) +
+  labs(y="Training set", x="Validation set", title="Scenario: across breeding program")+
+  geom_label(fill="white", linewidth=0,alpha=0.5, size=3.5)+
+  scale_fill_gradientn(
+    colours = c("red","orange","yellow","greenyellow","forestgreen"),
+    limits=c(0,1),na.value = "grey80")+
+  theme(strip.background=element_rect(color="grey85"), 
+        panel.border = element_rect(color="grey85"),
+        panel.grid=element_blank())
+plot(p.acBP)
+ggsave(here("output","figures","GP-heatmap_acBP-corP_all.png"),width=7,height=4,scale=0.85)
+
+## only with NURSERY as training set
+p.acBP.nur <- all.res |> filter(scenario %in% "acBP",
+                                trainSetBP == "NUR") |> 
+  mutate(validSetBP=factor(validSetBP, levels=BP.lvls),
+         trait=factor(trait, levels=traits)) |>
+  ggplot(aes(y=trait, x=validSetBP,fill=corP, label=sprintf('%.2f', corP)))+
+  geom_tile(show.legend=F, color="white")+
+  geom_label(fill="white", linewidth=0,alpha=0.5, size=4)+
+  scale_fill_gradientn(
+    colours = c("red","orange","yellow","greenyellow","forestgreen"),
+    limits=c(0,1),na.value = "grey80")+
+  theme_bigstatsr(size.rel=0.8)+
+  labs(y="Trait",x="Validation set", title="Scenario: full URN/URSN training set")+
+  theme(panel.grid=element_blank(),
+        axis.text = element_text(size=rel(1.1)))
+plot(p.acBP.nur)
+ggsave(here("output","figures","GP-heatmap_acBP-corP_NUR-TS.png"),
+       width=6,height=5,scale=0.9)
+
+```
+
+- What's the pair of TS/VS that gives the best predictive ability on average?
+```{r}
+acBP <- all.res |> filter(scenario %in% "acBP",!validSetBP %in% "NUR",!trainSetBP %in% "NUR") 
+summary(acBP$corP)
+## best pair of training/validation sets
+acBP |>  group_by(trainSetBP, validSetBP) |>
+  summarize(mean_corP=round(mean(corP),3), .groups="drop") |>
+  arrange(desc(mean_corP)) |> 
+  print_table()
+## best validation set
+acBP |> group_by(validSetBP) |>
+  summarize(mean_corP=round(mean(corP),3), .groups="drop") |>
+  arrange(desc(mean_corP)) |> 
+  print_table()
+## best training set
+acBP |> group_by(trainSetBP) |>
+  summarize(mean_corP=round(mean(corP),3), .groups="drop") |>
+  arrange(desc(mean_corP)) |> 
+  print_table()
+```
+
+
+- What is the mean and variance of predictive ability per trait?
+```{r}
+acBP |>  group_by(trait) |>
+  summarize(mean_corP=round(mean(corP),3),
+            sd_corP=round(sd(corP),3),
+            .groups="drop") |>
+  arrange(desc(mean_corP)) |> 
+  print_table()
+```
+
+
+Evaluation of NUR-all scenario
+```{r}
+nurs_all <- all.res |> filter(scenario %in% "acBP", trainSetBP %in% "NUR")
+nurs_all |> group_by(validSetBP) |> summarize(mean_corP=mean(corP))
+```
+
+
+<!-- ## TSopti -->
+
+<!-- ```{r} -->
+<!-- p.TSopti <- all.res |> filter(scenario %in% "TSoptiBP") |>  -->
+<!--   mutate(validSetBP=factor(validSetBP, levels=BP.lvls), -->
+<!--          trait=factor(trait, levels=traits)) |> -->
+<!--   ggplot(aes(y=trait, x=validSetBP,fill=corP, label=round(corP,3)))+ -->
+<!--   geom_tile(show.legend=F)+ -->
+<!--   geom_label(fill="white", linewidth=0,alpha=0.5, size=4)+ -->
+<!--   scale_fill_gradientn( -->
+<!--     colours = c("red","orange","yellow","greenyellow","forestgreen"), -->
+<!--     limits=c(0,1),na.value = "grey80")+ -->
+<!--   theme_bigstatsr(size.rel=0.8)+ -->
+<!--   labs(y="Trait",x="Validation set", title="Scenario: Optimal training set selection") -->
+<!-- p.TSopti -->
+<!-- ``` -->
+
+
+## nursBP
+
+```{r plot_nurs-BP}
+p.nursBP <- all.res |> filter(scenario %in% "nursBP",!is.na(corP)) |> 
+  mutate(validSetBP=factor(validSetBP, levels=BP.lvls),
+         trait=factor(trait, levels=traits)) |>
+  ggplot(aes(y=trait, x=validSetBP,fill=corP, label=sprintf('%.2f', corP)))+
+  geom_tile(show.legend=F, color="white", linewidth=0.8)+
+  geom_label(fill="white", linewidth=0,alpha=0.5, size=4)+
+  scale_fill_gradientn(
+    colours = c("red","orange","yellow","greenyellow","forestgreen"),
+    limits=c(0,1),na.value = "grey80")+
+  theme_bigstatsr(size.rel=0.8)+
+  labs(y="Trait",x="Validation set", title="Scenario: URN/URSN BP training set")+
+  theme(panel.grid=element_blank(),
+        axis.text = element_text(size=rel(1.1)))
+p.nursBP
+ggsave(here("output","figures","GP-heatmap_nursBP-corP.png"),
+       width=6,height=5,scale=0.9)
+```
+
+## Combine all initial scenarios
+
+### 4-panel figure
+
+```{r comb_scenarios, fig.height=8}
+# (p.wBP + p.acAllBP)/(p.acBP.nur+p.nursBP) + plot_layout(axes = "collect")
+# 
+# p.wBP <- p.wBP + ggtitle("wBP") + theme(axis.text.x = element_blank(),
+#                                         axis.title.x = element_blank())
+# p.acAllBP <- p.acAllBP + ggtitle("acAllBP") + theme(axis.text.x = element_blank(),
+#                                                     axis.title.x = element_blank())
+# p.acBP.nur <- p.acBP.nur + ggtitle("NUR-all") ;p.nursBP <- p.nursBP + ggtitle("NUR-BP")
+# p1 <- (p.wBP + p.acAllBP)+ plot_layout(axes = "collect")
+# p2 <- (p.acBP.nur+p.nursBP) + plot_layout(axes = "collect")
+# 
+# p1/p2 + plot_layout( guides="collect") 
+# ggsave(here("output","figures","GP-heatmap_4-scenarios-corP.png"),
+#        width=10,height=7,scale=0.75)
+```
+
+
+```{r}
+p1 <- p.wBP+ theme(plot.title=element_blank(), axis.title=element_blank())
+p2 <- p.acAllBP + theme(plot.title=element_blank(), axis.title=element_blank())
+p3 <- p.acBP + theme(plot.title=element_blank())
+p12 <- p1 + p2 + plot_layout(axes = "collect_y")
+p12/p3 + plot_annotation(tag_levels = "A")
+ggsave(here("output","figures","GP-heatmap_3-scenarios-corP.png"),
+       width=8,height=7,scale=0.75)
+```
+
+
+
+### Average predictive ability across traits for main scenarios
+
+Average predictive ability over the traits. 
+
+Format
+```{r}
+dat2plot <- all.res |> 
+  filter(nb.genos.VS != 0 | is.na(nb.genos.VS),
+         !validSetBP %in% "NUR",
+         scenario %in% c("wBP","acAllBP","nursBP")) |> 
+  bind_rows(filter(all.res, scenario %in% "acBP", trainSetBP %in% "NUR")) |> 
+  group_by(scenario, validSetBP) |>
+  summarize(mean_corP=mean(corP), .groups="drop") 
+dat2plot$scenario <- recode(dat2plot$scenario, "wBP"="within BP",
+                            "acAllBP"="across all BP", "nursBP"="NUR-BP","acBP"="NUR-all")
+
+## for the acBP, take the best average BP
+acBP_best <- all.res |> 
+  filter(scenario %in% "acBP", !trainSetBP %in% "NUR", !validSetBP %in% "NUR") |>
+  group_by(trainSetBP, validSetBP) |>
+  summarize(mean_corP=round(mean(corP),3), .groups="drop") |> 
+  slice_max(mean_corP, n=1, by=validSetBP) |> 
+  mutate(scenario="acBP best")
+print_table(acBP_best)
+dat2plot <- bind_rows(dat2plot, acBP_best) |> 
+  mutate(scenario=factor(scenario, levels=c("within BP","across all BP","acBP best","NUR-all","NUR-BP")))
+```
+
+Unexpectedly, MT is the best training set for ND.
+
+
+Plot
+```{r}
+cols <- c("within BP"="grey60", "across all BP"="brown1", "NUR-BP"="gold2", 
+          "NUR-all"="dodgerblue", "acBP best"="forestgreen")
+ggplot(dat2plot,aes(y=mean_corP, x=validSetBP,color=scenario,shape=scenario, group=scenario))+
+  geom_point(size=3.5, stroke=1.6, position = position_jitter(width=0.05, height=0))+
+  labs(y="Mean Pearson correlation",x="Validation set")+
+  scale_shape_manual(values=c(16,17,15,18,19),guide = FALSE)+
+  guides(color=guide_legend(override.aes = list(shape=c(16,17,15,18,19)), nrow=2))+
+  scale_color_manual(values=cols, name="Prediction scenario")+
+  theme_bigstatsr(size.rel=0.8)+
+  theme(legend.position="bottom",
+        legend.title.position="top",
+        #legend.direction="vertical",
+        panel.grid.major.x = element_blank(),
+        legend.title = element_text(hjust=0.5),
+        legend.byrow=T,
+        axis.text = element_text(size=rel(1.1)))
+ggsave(here("output","figures","GP-compare-scenarios_mean-corP.png"),
+       width=6,height=5,scale=0.8)
+
+ggplot(dat2plot,aes(y=mean_corP, x=validSetBP,fill=scenario, group=scenario))+
+  geom_col(position="dodge")+
+  #geom_line(linewidth=1.2,alpha=0.7)+
+  #geom_hline(yintercept=0,linetype="dashed",color="grey70")+
+  labs(y="Mean Pearson correlation",x="Validation set")+
+  #paletteer::scale_color_paletteer_d("calecopal::superbloom2", name="Prediction scenario") +
+  #paletteer::scale_color_paletteer_d("nbapalettes::warriors_city2", name="Prediction scenario")+ 
+  scale_fill_manual(values=cols, name="Prediction scenario")+
+  theme_bigstatsr(size.rel=0.8)+
+  theme(legend.position="bottom",
+        legend.title.position="top",
+        panel.grid.major.x = element_blank(),
+        legend.title = element_text(hjust=0.5),
+        legend.byrow=T,
+        axis.text = element_text(size=rel(1.1)))
+```
+
+
+
+### Main scenarios all in one figure
+
+```{r}
+cols.bp <- c("MN"="#7a0019","ND"="#2E8B57","SD"="#3A5FCD","MT"="#bd9b04",
+             "OTHER"="grey50","AAFC-CA"="#43AABA","PRIVATE"="#8A42C9",
+             "NUR"="grey60")
+
+## selection of traits
+all.res |> filter(nb.genos.VS != 0 | is.na(nb.genos.VS),
+                  !validSetBP %in% "NUR",
+                  scenario %in% c("wBP","acAllBP","acBP","nursBP")) |> 
+  ggplot(aes(y=corP, x=scenario,color=validSetBP, shape=trainSetBP,
+             label=round(corP,3), group=validSetBP))+
+  facet_wrap(~trait)+
+  geom_jitter(size=2,stroke=1,width=0.22,height=0)+
+  labs(y="Pearson correlation",x="Prediction scenario")+
+  geom_hline(yintercept=0,linetype="dashed",color="grey70")+
+  scale_color_manual(values=cols.bp, name="Validation set")+
+  scale_shape_manual(values=c(0:5), na.value = 19,name="Training set")+
+  theme_bigstatsr(size.rel=0.8)+
+  theme(legend.position="bottom",
+        legend.title.position="top",
+        #legend.direction = "vertical",
+        legend.byrow=T)
+ggsave(here("output","figures","GP-compare-scenarios_3-traits-corP.png"),
+       width=8,height=7,scale=0.9)  
+```
+
+<!-- ## Analyze effect of TPE -->
+
+<!-- ### Within TPE cross-validation -->
+
+<!-- ```{r res-wTPE} -->
+<!-- table(all.res$scenario) -->
+<!-- all.res |> filter(scenario %in% c("wTPE")) |> -->
+<!--   ggplot(aes(x=trainSetBP,y=trait, fill=corP, label=round(corP,3)))+ -->
+<!--   geom_tile(show.legend=F, color="white")+ -->
+<!--   geom_label(fill="white", linewidth=0,alpha=0.5, size=4.5)+ -->
+<!--   scale_fill_gradientn( -->
+<!--     colours = c("red","orange","yellow","greenyellow","forestgreen"), -->
+<!--     limits=c(0,1),na.value = "grey80")+ -->
+<!--   labs(y="Training set", x="Training and validation set", title="Scenario: within TPE")+ -->
+<!--   bigstatsr::theme_bigstatsr(size.rel=0.8)+ -->
+<!--   theme(axis.text = element_text(size=rel(1.1))) -->
+<!-- ggsave(here("output","figures","GP-heatmap_wTPE-corP.png"), -->
+<!--        width=7,height=6,scale=0.9) -->
+<!-- ``` -->
+
+<!-- ### Nursery TPE to breeding program -->
+
+<!-- Add results from acBP-NUR for comparison -->
+
+<!-- ```{r acTPE, fig.height=6} -->
+<!-- traits.tpe <- unique(all.res |> filter(scenario %in% "acTPE") |> pull(trait)) -->
+<!-- bind_rows( -->
+<!--   all.res |> filter(scenario %in% "acTPE"), -->
+<!--   all.res |> filter(scenario %in% "acBP", trainSetBP %in% "NUR")) |> -->
+<!--   mutate(trainSetBP=gsub(pattern="^NUR-",replacement="",trainSetBP), -->
+<!--          trainSetBP=gsub(pattern="-TPE$",replacement="",trainSetBP), -->
+<!--          trainSetBP=forcats::fct_relevel(trainSetBP, BP.lvls)) |> -->
+<!--   filter(trait %in% traits.tpe) |> -->
+<!--   ggplot(aes(x=trainSetBP, y=validSetBP, fill=corP, label=round(corP,2)))+ -->
+<!--   facet_wrap(~trait, scales="free", nrow=3)+ -->
+<!--   #scale_x_discrete(guide = guide_axis(n.dodge = 2))+ -->
+<!--   geom_tile(show.legend=F, color="white",linewidth=0.8)+ -->
+<!--   geom_label(fill="white", linewidth=0,alpha=0.5, size=4)+ -->
+<!--   scale_fill_gradientn( -->
+<!--     colours = c("red","orange","yellow","greenyellow","forestgreen"), -->
+<!--     limits=c(0,1),na.value = "grey80")+ -->
+<!--   labs(y="Validation set", x="Training set", title="Scenario: across TPE")+ -->
+<!--   bigstatsr::theme_bigstatsr(size.rel=0.8)+ -->
+<!--   theme(axis.text = element_text(size=rel(1.1))) -->
+<!-- ggsave(here("output","figures","GP-heatmap_acTPE-vs-acBP-NUR-corP.png"), -->
+<!--        width=10,height=7,scale=0.9) -->
+<!-- ``` -->
+
+# Other comparisons
+
+## wBP new cohort
+
+```{r CV-vs-new-cohort}
+#fct.lvl <- c("NUR-all",paste0("NUR-since",seq(2000,2020, by=5)))
+dat2plot <- bind_rows(
+  all.res |> filter(!trainSetBP %in% "NUR",scenario %in% c("wBP")),
+  all.res |> filter(scenario %in% c("wBP.co"))) |> 
+  mutate(TS=ifelse(scenario %in% "wBP", paste0(trainSetBP,"-CV"),
+                   paste0("BP-",cohort.valid)))
+#mutate(trainSetBP=fct_recode(trainSetBP, "NUR-all"="NUR")) 
+#mutate(trainSetBP=factor(trainSetBP, fct.lvl))
+
+cols <- c("grey30", paletteer::paletteer_c("ggthemes::Classic Green", n=5, direction = -1))
+
+#tapply(dat2plot$corP, dat2plot$trainSetBP, summary)
+
+# ggplot(dat2plot,aes(x=corP, y=trait,fill=TS))+ 
+#   facet_wrap(~validSetBP, scales="fixed")+
+#   labs(x="Pearson correlation",y="Trait")+ 
+#   # scale_fill_manual(values=cols,
+#   #                   labels=c("NUR-all"="NUR-all",
+#   #                            "NUR-since2000"="NUR since 2000",
+#   #                            "NUR-since2005"="NUR since 2005",
+#   #                            "NUR-since2010"="NUR since 2010",
+#   #                            "NUR-since2015"="NUR since 2015",
+#   #                            "NUR-since2020"="NUR since 2020"),
+#   #                   name="Training set composition")+
+#   guides(fill=guide_legend(nrow=2))+
+#   bigstatsr::theme_bigstatsr(size.rel=0.8)+ 
+#   geom_col(position=position_dodge(0.9),colour = "white")+ 
+#   theme(legend.position="bottom", 
+#         legend.title.position="top", 
+#         legend.byrow=T, 
+#         strip.background=element_rect(color=NA), 
+#         panel.border = element_rect(color="grey85"))
+# ggsave(here("output","figures","GP-wBP-scenarios_predict-new-cohort.png"),
+#        width=7,height=7,scale=0.8)
+
+## define color scale: -CV as cols.bp and other years as gradient
+cols.tmp <- c("MN-CV"="#7a0019","ND-CV"="#2E8B57","SD-CV"="#3A5FCD","MT-CV"="#bd9b04")
+cols.tmp <- c(cols.tmp, paletteer::paletteer_c("oompaBase::greyscale", n=9, direction = -1))
+names(cols.tmp) <- c(names(cols.tmp)[1:4], paste0("BP-",seq(2017,2025, by=1)))
+
+dat2plot |> filter(!validSetBP %in% "ND") |> 
+  mutate(TS.def=as.character(fct_recode(TS, "BP"="MN-CV","BP"="ND-CV","BP"="SD-CV","BP"="MT-CV"))) |>
+  ggplot(aes(x=corP, y=TS.def,fill=TS))+ 
+  facet_grid(validSetBP~trait, scales="fixed")+
+  labs(x="Pearson correlation",y="Validation set")+
+  geom_col(position=position_dodge(0.9))+
+  theme_bigstatsr(size.rel=0.8)+
+  scale_x_continuous(breaks = seq(-0.4,0.5,by=0.2))+
+  scale_fill_manual(values=cols.tmp, name="Validation set composition")+
+  theme(legend.position="none")
+ggsave(here("output","figures","GP-wBP-scenarios_predict-new-cohort.png"),
+       width=10,height=7,scale=0.9)
+# dat2plot |> filter(!validSetBP %in% "ND") |> 
+#   mutate(TS.def=as.character(fct_recode(TS, "BP"="MN-CV", "BP"="ND-CV", "BP"="SD-CV", "BP"="MT-CV"))) |>
+#   ggplot(aes(y=TS.def, x=trait, fill=corP))+
+#   facet_wrap(~validSetBP)+
+#   geom_tile()
+#   #theme(axis.text.x=element_text(angle=90))
+
+```
+
+
+## acBPAll Training set optimization
+
+```{r}
+dat2plot <- all.res |> filter(scenario %in% c("acAllBP","TSoptiBP"),
+                              !validSetBP %in% "NUR") 
+tapply(dat2plot$corP, dat2plot$scenario, summary)
+ggplot(dat2plot, aes(x=trait, y=corP, fill=scenario))+
+  facet_wrap(~validSetBP)+
+  geom_col(position="dodge")+
+  theme_bigstatsr(size.rel=0.8)+
+  scale_fill_manual(values=c("acAllBP"="grey70","TSoptiBP"="brown1"),
+                    name="Prediction scenario",
+                    labels=c("acAllBP"="all genotypes","TSoptiBP"="optimized TS"))+
+  labs(y="Predictive ability", x="Trait")+
+  theme(legend.position="bottom",
+        legend.byrow=T, 
+        strip.background=element_rect(color=NA), 
+        panel.border = element_rect(color="grey85"))
+ggsave(here("output","figures","GP-compare-scenarios_acAllBP_TSoptiBP_corP.png"),
+       width=7,height=6,scale=0.8)
+```
+
+
+## Compare use of nursery 
+
+### Nursery, subset or not by BP
+
+```{r}
+dat2plot <- bind_rows(
+  all.res |> filter(trainSetBP %in% "NUR",scenario %in% c("acBP")),
+  all.res |> filter(scenario %in% c("nursBP"))) |> 
+  mutate(scenario=factor(scenario, levels=c("nursBP","acBP"))) 
+
+
+tapply(dat2plot$corP, dat2plot$scenario, summary)
+dat.wide <- tidyr::pivot_wider(dat2plot, id_cols=c("trait","validSetBP"), 
+                               names_from = scenario, values_from = corP)
+cor(dat.wide$acBP, dat.wide$nursBP, use="complete.obs")
+wilcox.test(dat.wide$acBP, dat.wide$nursBP, paired=T)
+ggplot(dat2plot,aes(y=corP, x=trait,fill=scenario))+ 
+  facet_wrap(~validSetBP, scales="free_x")+
+  labs(y="Pearson correlation",x="Trait")+ 
+  scale_fill_manual(values=c("acBP"="dodgerblue","nursBP"="gold2"),
+                    labels=c("acBP"="NUR-all","nursBP"="NUR-BP"),
+                    name="Prediction scenario")+ 
+  bigstatsr::theme_bigstatsr(size.rel=0.8)+ 
+  geom_col(position="dodge")+ 
+  theme(legend.position="bottom", 
+        legend.title.position="top", 
+        legend.byrow=T, 
+        strip.background=element_rect(color=NA), 
+        panel.border = element_rect(color="grey85"))
+ggsave(here("output","figures","GP-compare-nursery-scenarios_corP.png"),
+       width=6,height=7,scale=0.8)
+```
+
+
+
+```{r}
+ggplot(dat2plot, aes(x=scenario, y=corP, group=trait, color=trait))+
+  facet_wrap(~validSetBP)+
+  geom_hline(yintercept=0, linetype="dashed", color="grey70")+
+  geom_point(size=2.5) +
+  geom_line(alpha=0.7, linewidth=1) +
+  scale_color_manual(values=trait.pal, name="Trait")+
+  labs(y="Predictive ability", x="Training set")+
+  theme_bigstatsr(size.rel=0.8)+
+  scale_x_discrete(labels=c("acBP"="full NUR TS","nursBP"="NUR-BP TS", "acTPE"="NUR-TPE TS"))+
+  theme(legend.position="bottom", 
+        legend.title.position="top", 
+        legend.byrow=T, 
+        strip.background=element_rect(color=NA), 
+        panel.border = element_rect(color="grey85"))
+ggsave(here("output","figures","GP-compare-nursery-scenarios_corP_lines.png"),
+       width=10,height=6,scale=0.9)
+```
+
+Some statistics:
+```{r}
+dat2plot |> 
+  group_by(scenario, validSetBP) |> 
+  summarize(mean_corP=round(mean(corP),4), .groups="drop") |> 
+  tidyr::pivot_wider(id_cols = validSetBP, names_from = scenario, values_from = mean_corP) 
+```
+
+
+
+### Include only the most recent genotypes
+
+Data formatting
+
+```{r}
+dat2plot <- bind_rows(
+  all.res |> select(-nb.genos.TS, -nb.genos.VS, -nb.snps,-cohort.valid) |> 
+    filter(trainSetBP %in% "NUR",scenario %in% c("acBP")) |>
+    left_join(genRel |> filter(trainSetBP %in% "NUR", scenario %in% "acBP"),
+              by=c("trainSetBP","validSetBP","trait","scenario")),
+  all.res |> filter(scenario %in% c("acBP-NUR-sinceDate"))) |> 
+  mutate(trainSetBP=fct_recode(trainSetBP, "NUR-all"="all")) |> 
+  select(-nb.snps,-cohort.valid) 
+
+genRel_acBP <- genRel |> 
+  filter(scenario %in% "acBP_sinceDate") |> 
+  mutate(trainSetBP=ifelse(date == "all","NUR",paste0("NUR-since",date))) |> 
+  select(-scenario)
+
+
+dat2plot <- bind_rows(
+  all.res |> 
+    filter(trainSetBP %in% "NUR",scenario %in% c("acBP")),
+  all.res |> filter(scenario %in% c("acBP-NUR-sinceDate"))) |> 
+  #mutate(trainSetBP=fct_recode(trainSetBP, "NUR-all"="all")) |> 
+  select(trait, scenario, trainSetBP, validSetBP, corP) |> 
+  left_join(genRel_acBP,by = join_by(trait, trainSetBP, validSetBP))
+
+
+cols <- c("grey30", paletteer::paletteer_c("ggthemes::Classic Blue", n=5, direction = -1))
+
+labs <- c("NUR-all"="all NUR",
+          "NUR-since2000"="NUR since 2000",
+          "NUR-since2005"="NUR since 2005",
+          "NUR-since2010"="NUR since 2010",
+          "NUR-since2015"="NUR since 2015",
+          "NUR-since2020"="NUR since 2020")
+
+```
+
+
+Number of genotypes by training set
+
+```{r training_set_size}
+nTS <- dat2plot |> group_by(trait, trainSetBP) |> summarize(nTS=unique(nb.genos.TS), .groups="drop")
+
+gTS <- ggplot(nTS, aes(x=trait, y=nTS, fill=trainSetBP))+
+  geom_col(position=position_dodge(0.9), color="white")+
+  scale_fill_manual(values=cols, name="Training set composition", labels=labs)+
+  geom_label(aes(label=paste0("n=",nTS), group=trainSetBP,
+                 x=trait, y=1),hjust=0,
+             angle=90,size=3,fill="white",color="black",
+             alpha=0.3, linewidth=0, show.legend=F,
+             position=position_dodge(0.9))+
+  scale_color_manual(values=cols,labels=labs)+
+  labs(y="Number of genotypes", x="Trait")+
+  theme_bigstatsr(size.rel=0.65)+
+  theme(legend.position="none", plot.background = element_rect(color="black"))
+gTS
+ggsave(here("output","figures","GP-compare-nursery-scenarios_sinceDate-genos_nTS.png"),
+       width=7,height=5,scale=0.55)
+```
+
+```{r NUR-recent}
+
+tapply(dat2plot$corP, dat2plot$trainSetBP, summary)
+
+g2 <- ggplot(dat2plot,aes(y=corP, x=trait,fill=trainSetBP))+ 
+  facet_wrap(~validSetBP, scales="fixed")+
+  geom_col(position=position_dodge(0.9), colour = "white")+
+  labs(y="Pearson correlation",x="Trait")+ 
+  
+  scale_fill_manual(values=cols,labels=labs,
+                    name="Training set composition")+
+  guides(fill=guide_legend(nrow=3))+
+  bigstatsr::theme_bigstatsr(size.rel=0.8)+ 
+  theme(legend.position="bottom", 
+        legend.title.position="top",legend.justification = "left",
+        legend.byrow=F, 
+        strip.background=element_rect(color="grey85"), 
+        panel.border = element_rect(color="grey85"),
+        panel.grid.major.x=element_blank())
+g2
+
+ggsave(here("output","figures","GP-compare-nursery-scenarios_sinceDate-genos_corP.png"),
+       width=7,height=5,scale=0.85)
+```
+
+Add mean number of genotypes in the legend
+```{r}
+txt2add <- dat2plot |> 
+  summarize(n=round(mean(nb.genos.TS)), .by=trainSetBP) |> 
+  mutate(labs=paste0(trainSetBP," ($\\bar{n}=",n,")$")) |> 
+  ## add space between since and number
+  mutate(labs=gsub("since2","since 2",labs)) |> 
+  mutate(labs=gsub("-", " ",labs))
+
+labs <- TeX(txt2add$labs)
+names(labs) <- txt2add$trainSetBP
+
+ggplot(dat2plot,aes(y=corP, x=trait,fill=trainSetBP))+ 
+  facet_wrap(~validSetBP, scales="fixed")+
+  geom_col(position=position_dodge(0.9), colour = "white")+
+  labs(y="Pearson correlation",x="Trait")+ 
+  scale_fill_manual(values=cols,labels=labs,
+                    name="Training set composition")+
+  guides(fill=guide_legend(nrow=3))+
+  bigstatsr::theme_bigstatsr(size.rel=0.8)+ 
+  theme(legend.position="bottom", 
+        legend.title.position="top",
+        legend.title = ggtext::element_markdown(hjust=0.5),
+        legend.byrow=F, 
+        strip.background=element_rect(color="grey85"), 
+        panel.border = element_rect(color="grey85"),
+        panel.grid.major.x=element_blank())
+ggsave(here("output","figures","GP-compare-nursery-scenarios_sinceDate-genos_corP_v2.png"),
+       width=7,height=6,scale=0.85)
+```
+
+
+### Include only URN or URSN
+
+```{r}
+dat2plot <- all.res |> filter(trainSetBP %in% c("NUR","URN", "URSN"))
+tapply(dat2plot$corP, dat2plot$trainSetBP, summary)
+# 
+# wilcox.test(dat2plot$corP[dat2plot$trainSetBP %in% "NUR"],
+#             dat2plot$corP[dat2plot$trainSetBP %in% "NUR-URN"], paired=T)
+# wilcox.test(dat2plot$corP[dat2plot$trainSetBP %in% "NUR"],
+#             dat2plot$corP[dat2plot$trainSetBP %in% "NUR-URSN"], paired=T)
+
+## signif diff for URSN (lower) compared to all, non-signif diff for URN compared to all
+
+ggplot(dat2plot,aes(y=corP, x=trait,fill=trainSetBP))+ 
+  facet_wrap(~validSetBP, scales="fixed")+
+  geom_col(position=position_dodge(0.9), colour = "white")+
+  labs(y="Pearson correlation",x="Trait")+ 
+  
+  scale_fill_manual(values=c("NUR"="dodgerblue", 
+                             "URN"="seagreen2",
+                             "URSN"="sienna1"),
+                    name="Training set composition")+
+  guides(fill=guide_legend(nrow=1))+
+  bigstatsr::theme_bigstatsr(size.rel=0.8)+ 
+  theme(legend.position="bottom", 
+        legend.title.position="top",#legend.justification = "left",
+        legend.byrow=F, 
+        strip.background=element_rect(color="grey85"), 
+        panel.border = element_rect(color="grey85"),
+        panel.grid.major.x=element_blank())
+ggsave(here("output","figures","GP-compare-nursery-scenarios_subset-URN-URSN-corP.png"),
+       width=7,height=5,scale=0.85)
+```
+
+
+<!-- ```{r} -->
+<!-- ggdraw()+ -->
+<!--   draw_plot(g2, x=0, y=0, width=1, height=0.7)+ -->
+<!--   draw_plot(gTS, x=0.6, y=0.01, width=.38, height=0.2, scale=1) -->
+
+<!-- ggsave(here("output","figures","GP-compare-nursery-scenarios_sinceDate-genos_corP_with-nTS.png"), -->
+<!--        width=9,height=10,scale=0.9) -->
+<!-- ``` -->
+
+
+
+<!-- ### BRR method for including a variance-specific for each BP -->
+
+<!-- ```{r} -->
+<!-- dat2plot <-all.res |> filter(scenario %in% c("acAllBP_varBP","acAllBP"), !validSetBP %in% "NUR") -->
+<!-- tapply(dat2plot$corP, dat2plot$scenario, summary) -->
+
+<!-- ## stat test -->
+<!-- dat.wide <- tidyr::pivot_wider(dat2plot, id_cols=c("trait","validSetBP"),  -->
+<!--                                names_from = scenario, values_from = corP) -->
+<!-- cor(dat.wide$acAllBP, dat.wide$acAllBP_varBP, use="complete.obs") -->
+<!-- wilcox.test(dat.wide$acAllBP, dat.wide$acAllBP_varBP, paired=T) -->
+<!-- ## plot -->
+<!-- ggplot(dat2plot,aes(x=corP, y=trait,fill=scenario))+  -->
+<!--   facet_wrap(~validSetBP, scales="free_y")+ -->
+<!--   labs(x="Pearson correlation",y="Trait")+  -->
+<!--   scale_fill_manual(values=c("acAllBP"="grey60","acAllBP_varBP"="maroon"))+ -->
+<!--   bigstatsr::theme_bigstatsr(size.rel=0.8)+  -->
+<!--   geom_col(position="dodge")+  -->
+<!--   theme(legend.position="bottom",  -->
+<!--         legend.title.position="top",  -->
+<!--         legend.byrow=T,  -->
+<!--         strip.background=element_rect(color=NA),  -->
+<!--         panel.border = element_rect(color="grey85")) -->
+<!-- ggsave(here("output","figures","GP-compare-scenarios_acAllBP_varBP_corP.png"), -->
+<!--        width=7,height=6,scale=0.8) -->
+<!-- ``` -->
+
+
+<!-- ### Training set size effect: resampling ND genotypes -->
+
+<!-- ```{r} -->
+<!-- dat2plot <-all.res |> filter(scenario %in% c("acAllBP.resampND","acAllBP"), -->
+<!--                              !validSetBP %in% c("NUR","ND")) -->
+<!-- tapply(dat2plot$corP, dat2plot$scenario, summary) -->
+
+<!-- ## stat test -->
+<!-- dat.wide <- tidyr::pivot_wider(dat2plot, id_cols=c("trait","validSetBP"),  -->
+<!--                                names_from = scenario, values_from = corP) -->
+<!-- cor(dat.wide$acAllBP, dat.wide$acAllBP.resampND, use="complete.obs") -->
+<!-- wilcox.test(dat.wide$acAllBP, dat.wide$acAllBP.resampND, paired=T) -->
+
+<!-- ## plot -->
+<!-- ggplot(dat2plot,aes(x=corP, y=trait,fill=scenario))+  -->
+<!--   facet_wrap(~validSetBP, scales="free_y")+ -->
+<!--   labs(x="Pearson correlation",y="Trait")+  -->
+<!--   scale_fill_manual(values=c("acAllBP"="grey70","acAllBP.resampND"="forestgreen"))+ -->
+<!--   bigstatsr::theme_bigstatsr(size.rel=0.8)+  -->
+<!--   geom_col(position="dodge")+  -->
+<!--   theme(legend.position="bottom",  -->
+<!--         legend.title.position="top",  -->
+<!--         legend.byrow=T,  -->
+<!--         strip.background=element_rect(color=NA),  -->
+<!--         panel.border = element_rect(color="grey85")) -->
+<!-- ggsave(here("output","figures","GP-compare-scenarios_acAllBP.resampND_corP.png"), -->
+<!--        width=7,height=6,scale=0.8) -->
+<!-- ``` -->
+
+### Compare the ND wheat classes
+
+```{r}
+dat2plot <-all.res |> filter(scenario %in% c("acBP_NDwheatClass","acBP"),
+                             trainSetBP %in% c("ND","ND-RED","ND-WHITE"),
+                             !validSetBP %in% "NUR", trait %in% "DIS")
+tapply(dat2plot$corP, dat2plot$trainSetBP, summary)
+
+
+## stat test
+dat.wide <- tidyr::pivot_wider(dat2plot,
+                               id_cols=c("trait","validSetBP"), 
+                               names_from = trainSetBP, values_from = corP)
+cor(dat.wide$ND, dat.wide$`ND-WHITE`, use="complete.obs")
+wilcox.test(dat.wide$ND, dat.wide$`ND-WHITE`, paired=T)
+
+cor(dat.wide$ND, dat.wide$`ND-RED`, use="complete.obs")
+wilcox.test(dat.wide$ND, dat.wide$`ND-RED`, paired=T)
+
+## plot
+ggplot(dat2plot,aes(x=corP, y=validSetBP,fill=trainSetBP))+ 
+  #facet_wrap(~validSetBP, scales="fixed")+
+  labs(x="Pearson correlation",y="Trait")+
+  scale_fill_manual(values=c("ND"="grey60","ND-RED"="#D40F7DFF","ND-WHITE"="wheat"),
+                    name="Training set")+
+  bigstatsr::theme_bigstatsr(size.rel=0.8)+
+  geom_col(position=position_dodge(0.9),colour = "white")+
+  theme(legend.position="bottom",
+        legend.title.position="top")
+ggsave(here("output","figures","GP-compare-scenarios_acBP_NDwheatClass_DIS_corP.png"),
+       width=7,height=5,scale=0.8)
+```
+
+
+
+<!-- ## Effect of training set optimization -->
+
+<!-- ```{r} -->
+<!-- all.res |> filter(nb.genos.VS != 0 | is.na(nb.genos.VS), -->
+<!--                   scenario %in% c("TSoptiBP","acAllBP")) |>  -->
+<!--   ggplot(aes(y=corP, x=validSetBP,fill=scenario))+ -->
+<!--   facet_wrap(~trait)+ -->
+<!--   labs(y="Pearson correlation",x="Validation set")+ -->
+<!--   scale_fill_manual(values=c("TSoptiBP"="dodgerblue","acAllBP"="grey50"), -->
+<!--                     name="Prediction scenario")+ -->
+<!--   bigstatsr::theme_bigstatsr(size.rel=0.8)+ -->
+<!--   geom_col(position="dodge")+ -->
+<!--   theme(legend.position="bottom", -->
+<!--         legend.title.position="top", -->
+<!--         legend.byrow=T, -->
+<!--         strip.background=element_rect(color=NA), -->
+<!--         panel.border = element_rect(color="grey85")) -->
+
+<!-- ``` -->
+
+
+# Study variables impacting the predictive ability
+
+## Effects of phenotype characteristics
+
+### H2 of the validation set
+
+```{r}
+## Map H2 of the validation set
+all.res |> left_join(dat$fitSummary, by=c("trait","validSetBP"="BP")) |>
+  filter(scenario %in% c("wBP","acAllBP","nursBP", "acBP")) |> 
+  ggplot(aes(x=H2.Cullis, y=corP))+
+  facet_wrap(~scenario)+
+  scale_shape_manual(values=c(0:5), name="Prediction scenario")+
+  guides(shape=guide_legend(nrow=2))+
+  geom_vline(xintercept=0, linetype="dashed", color="grey70",linewidth=0.8)+
+  geom_smooth(method="lm", se=TRUE, color="black", linetype="dotted", linewidth=0.2)+
+  geom_point(stroke=1.3, size=2.2, aes(color=validSetBP, shape=scenario))+
+  geom_rug(sides="bl", mapping=aes(color=validSetBP), linewidth=0.3)+
+  #ggpmisc::stat_correlation(method="pearson", label.x = "left", label.y="top")+
+  ggpubr::stat_cor(cor.coef.name = "R", label.x.npc = 0.5)+
+  scale_color_manual(values=cols.bp, name="Validation set")+
+  labs(y="Predictive ability", x="H2 Cullis")+
+  theme_bigstatsr(size.rel=0.8)+
+  theme(legend.position="bottom", legend.title.position="top", legend.byrow=T)
+
+all.res |> left_join(dat$fitSummary, by=c("trait","validSetBP"="BP")) |>
+  filter(scenario %in% c( "acBP")) |> 
+  ggplot(aes(x=H2.Cullis, y=corP))+
+  facet_wrap(~trainSetBP)+
+  scale_shape_manual(values=c(0:5), name="Prediction scenario")+
+  guides(shape=guide_legend(nrow=2))+
+  geom_hline(yintercept=0, linetype="dashed", color="grey70",linewidth=0.8)+
+  geom_smooth(method="lm", se=TRUE, color="black", linetype="dotted", linewidth=0.2)+
+  geom_point(stroke=1.3, size=2.2, aes(color=validSetBP))+
+  geom_rug(sides="bl", mapping=aes(color=validSetBP), linewidth=0.3)+
+  #ggpmisc::stat_correlation(method="pearson", label.x = "left", label.y="top")+
+  ggpubr::stat_cor(cor.coef.name = "R", label.x.npc = 0.1)+
+  scale_color_manual(values=cols.bp, name="Validation set")+
+  labs(y="Predictive ability", x="H2 Cullis")+
+  theme_bigstatsr(size.rel=0.8)+
+  theme(legend.position="bottom", legend.title.position="top", legend.byrow=T)
+
+
+# all.res |> left_join(dat$fitSummary, by=c("trait","validSetBP"="BP")) |>
+#   filter(scenario %in% c( "acBP")) |> 
+#   ggplot(aes(x=H2.Cullis, y=corP))+
+#   scale_shape_manual(values=c(0:5), name="Prediction scenario")+
+#   guides(shape=guide_legend(nrow=2))+
+#   geom_vline(xintercept=0, linetype="dashed", color="grey70",linewidth=0.8)+
+#   geom_smooth(method="lm", se=TRUE, color="black", linetype="dotted", linewidth=0.2)+
+#   geom_point(stroke=1.3, size=2.2, aes(color=validSetBP, shape=trainSetBP))+
+#   geom_rug(sides="bl", mapping=aes(color=validSetBP), linewidth=0.3)+
+#   #ggpmisc::stat_correlation(method="pearson", label.x = "left", label.y="top")+
+#   ggpubr::stat_cor(cor.coef.name = "R", label.x.npc = 0.1)+
+#   scale_color_manual(values=cols.bp, name="Validation set")+
+#   labs(x="Predictive ability", y="H2 Cullis")+
+#   theme_bigstatsr(size.rel=0.8)+
+#   theme(legend.position="bottom", legend.title.position="top", legend.byrow=T)
+```
+
+
+### H2 of the training set 
+
+```{r}
+
+## Map H2 of the training set
+all.res |> left_join(dat$fitSummary, by=c("trait","trainSetBP"="BP")) |>
+  filter(scenario %in% c("acBP")) |> 
+  ggplot(aes(x=H2.Cullis, y=corP))+
+  facet_wrap(~validSetBP)+
+  guides(shape=guide_legend(nrow=2))+
+  geom_hline(yintercept=0, linetype="dashed", color="grey70",linewidth=0.8)+
+  geom_smooth(method="lm", se=TRUE, color="black", linetype="dotted", linewidth=0.2)+
+  geom_point(stroke=1.3, size=2.2, aes(color=trainSetBP))+
+  geom_rug(sides="bl", mapping=aes(color=trainSetBP), linewidth=0.3)+
+  #ggpmisc::stat_correlation(method="pearson", label.x = "left", label.y="top")+
+  ggpubr::stat_cor(cor.coef.name = "R", label.x.npc = 0.1)+
+  scale_color_manual(values=cols.bp, name="Training set")+
+  labs(y="Predictive ability", x="H2 Cullis")+
+  theme_bigstatsr(size.rel=0.8)+
+  theme(legend.position="bottom", legend.title.position="top", legend.byrow=T)
+```
+
+
+## Genetic variance of the validation set
+
+```{r}
+## Map genetic variance of the validation set
+dat2plot <- all.res |> filter(scenario %in% c("acBP")) |> 
+  left_join(dat$fitSummary, by=c("trait","validSetBP"="BP")) |> 
+  dplyr::select(trait, scenario, trainSetBP, validSetBP, corP, varG) |> 
+  mutate(trainSetBP=forcats::fct_relevel(trainSetBP, BP.lvls),
+         validSetBP=forcats::fct_relevel(validSetBP, BP.lvls))
+
+ggplot(dat2plot,aes(x=varG, y=corP))+
+  facet_wrap(~trainSetBP, labeller = "label_both")+
+  guides(shape=guide_legend(nrow=1, title="Trait"),
+         color=guide_legend(ncol=2))+
+  geom_hline(yintercept=0, linetype="dashed", color="grey70",linewidth=0.8)+
+  geom_smooth(method="lm", se=TRUE, color="black", linetype="dotted", linewidth=0.2,alpha=0.2)+
+  geom_point(stroke=1.3, size=2.2, aes(color=validSetBP, shape=trait))+
+  geom_rug(sides="bl", mapping=aes(color=validSetBP), linewidth=0.5)+
+  #ggpmisc::stat_correlation(method="pearson", label.x = "left", label.y="top")+
+  ggpubr::stat_cor(cor.coef.name = "R", label.x.npc=0.35, label.y.npc=0.1)+
+  # aes(paste(after_stat(r.label), after_stat(p.signif), sep = "~")))+
+  scale_color_manual(values=cols.bp, name="Validation set")+
+  labs(x="Genetic variance validation set", y="Predictive ability")+
+  theme_bigstatsr(size.rel=0.8)+
+  theme(legend.position="inside", legend.title.position="top", legend.byrow=T,
+        legend.position.inside = c(0.85,0.2),
+        strip.background = element_rect(color="grey85"), 
+        panel.border = element_rect(color="grey85"))
+ggsave(here("output","figures","GP-corP_vs-varG_validSet_by-BPs.png"),
+       width=8,height=6, scale=0.95)
+
+# all.res |> 
+#   left_join(dat$fitSummary, by=c("trait","validSetBP"="BP")) |>
+#   filter(scenario %in% c("acBP")) |> 
+#   ggplot(aes(x=varG, y=corP))+
+#   #facet_wrap(~trainSetBP)+
+#   guides(shape=guide_legend(nrow=2))+
+#   ggpubr::stat_cor(cor.coef.name = "R", label.x.npc = 0.1, 
+#                    inherit.aes=FALSE,color="black",
+#                    mapping=aes(x=varG, y=corP))+
+#   scale_shape_manual(values=c(0:5), na.value = 19,name="Training set")+
+#   #geom_vline(xintercept=0, linetype="dashed", color="grey70",linewidth=0.8)+
+#   geom_smooth(method="lm", se=TRUE, color="black", linetype="dotted", linewidth=0.2)+
+#   geom_jitter(width=1, height=0,stroke=1.5, size=1.8, aes(color=validSetBP,shape=trainSetBP))+
+#   geom_rug(sides="bl", mapping=aes(color=validSetBP), linewidth=0.3)+
+#   #ggpmisc::stat_correlation(method="pearson", label.x = "left", label.y="top")+
+#   geom_hline(yintercept=0, linetype="dashed", color="grey70",linewidth=0.8)+
+#   scale_color_manual(values=cols.bp, name="Validation set")+
+#   labs(x="Genetic variance validation set", y="Predictive ability")+
+#   theme_bigstatsr(size.rel=0.8)+
+#   theme(legend.position="bottom", legend.title.position="top", legend.byrow=T)
+# ggsave(here("output","figures","GP-corP_vs-varG_validSet_all-BPs.png"),
+#        width=7,height=5,scale=0.9)
+```
+## Training set size?
+
+```{r}
+genRel |> filter(scenario %in% c("acBP","acAllBP"), trainSetBP %in% c("NUR","AllOtherBP")) |> 
+  summarize(mean_nb.genos.TS=mean(nb.genos.TS),.by=scenario)
+```
+
+
+<!-- ```{r} -->
+<!-- acAll <- all.res |> filter(!is.na(h2Val)) -->
+<!-- fit <- lm(formula=corP ~ h2Train + h2Val + nb.genos.TS + nb.genos.VS+Mean, -->
+<!--           data=acAll) -->
+<!-- summary(fit) -->
+<!-- st.fit <- step(fit) -->
+<!-- summary(st.fit) -->
+<!-- ``` -->
+
+```{r}
+dat2plot <- all.res |> filter(scenario %in% c("acBP")) |> 
+  left_join(dat$fitSummary, by=c("trait","trainSetBP"="BP")) |> 
+  dplyr::select(trait, scenario, trainSetBP, validSetBP, corP, varG) |> 
+  mutate(trainSetBP=forcats::fct_relevel(trainSetBP, BP.lvls),
+         validSetBP=forcats::fct_relevel(validSetBP, BP.lvls))
+
+ggplot(dat2plot,aes(x=varG, y=corP))+
+  facet_wrap(~validSetBP, labeller = "label_both")+
+  guides(shape=guide_legend(nrow=1, title="Trait"),
+         color=guide_legend(ncol=2))+
+  geom_hline(yintercept=0, linetype="dashed", color="grey70",linewidth=0.8)+
+  geom_smooth(method="lm", se=TRUE, color="black", linetype="dotted", linewidth=0.2,alpha=0.2)+
+  geom_point(stroke=1.3, size=2.2, aes(color=trainSetBP, shape=trait))+
+  geom_rug(sides="bl", mapping=aes(color=trainSetBP), linewidth=0.5)+
+  #ggpmisc::stat_correlation(method="pearson", label.x = "left", label.y="top")+
+  ggpubr::stat_cor(cor.coef.name = "R", label.x.npc=0.35, label.y.npc=0.1)+
+  # aes(paste(after_stat(r.label), after_stat(p.signif), sep = "~")))+
+  scale_color_manual(values=cols.bp, name="Training set")+
+  labs(x="Genetic variance training set", y="Predictive ability")+
+  theme_bigstatsr(size.rel=0.8)+
+  theme(legend.position="inside", legend.title.position="top", legend.byrow=T,
+        legend.position.inside = c(0.85,0.2),
+        strip.background = element_rect(color="grey85"), 
+        panel.border = element_rect(color="grey85"))
+```
+
+
+## Effect of genetic relatedness
+
+Table generated in `extract_gen-rel_prediction-scenario.Rmd`.
+
+```{r}
+table(genRel$scenario)
+unique(genRel$trainSetBP)
+genRel <- genRel |> 
+  #group_by(trait, scenario, trainSetBP, validSetBP, quantiles) |>
+  group_by(trait, scenario, trainSetBP, validSetBP) |>
+  summarize(nb.genos.TS=mean(nb.genos.TS),
+            nb.genos.VS=mean(nb.genos.VS),
+            Roger_distance=mean(Roger_distance), .groups="drop")
+```
+
+Combine predictive ability and genetic relatedness
+
+```{r}
+table(all.res$scenario)
+all.res$trainSetBP[all.res$scenario %in% "acAllBP"] <- "AllOtherBP"
+idx <- which(all.res$scenario %in% "nursBP")
+all.res$trainSetBP[idx] <- paste0("NUR-", all.res$validSetBP[idx])
+pa.rel <- all.res |>
+  filter(!validSetBP %in% "NUR",
+         !scenario %in% c("acTPE","wTPE")) |> 
+  dplyr::select(trait, scenario, trainSetBP,validSetBP, corP) |>
+  left_join(genRel, by=c("trait","scenario","trainSetBP","validSetBP")) |>
+  filter(!is.na(Roger_distance)) 
+#filter(quantiles %in% "90%") 
+unique(pa.rel$scenario)
+pa.rel$scenario[pa.rel$scenario %in% "acBP" & pa.rel$trainSetBP %in% "NUR"] <- "NUR-all"
+pa.rel$scenario <- recode(pa.rel$scenario, "wBP"="within BP",
+                          "acAllBP"="across all BP", "nursBP"="NUR-BP","acBP"="NUR-all")
+scenarios <- c("within BP","across all BP","NUR-BP","NUR-all")
+```
+
+
+```{r}
+
+## Plot PA vs. Roger's distance
+pa.rel |> filter(scenario %in% scenarios) |> 
+  ggplot(aes(y=corP, x=Roger_distance))+
+  #facet_wrap(~trait)+
+  scale_shape_manual(values=c(0:5), name="Prediction scenario")+
+  guides(shape=guide_legend(nrow=2))+
+  geom_hline(yintercept=0, linetype="dashed", color="grey70",linewidth=0.8)+
+  geom_smooth(method="lm", se=TRUE, color="black", linetype="dotted", linewidth=0.2)+
+  geom_point(stroke=1.3, size=2.2, aes(color=validSetBP, shape=scenario))+
+  geom_rug(sides="bl", mapping=aes(color=validSetBP), linewidth=0.3)+
+  #ggpmisc::stat_correlation(method="pearson", label.x = "left", label.y="top")+
+  ggpubr::stat_cor(cor.coef.name = "R", label.x.npc = 0.7)+
+  scale_color_manual(values=cols.bp, name="Validation set")+
+  labs(y="Predictive ability", x="Roger's distance")+
+  theme_bigstatsr(size.rel=0.8)+
+  theme(legend.position="bottom", legend.title.position="top", legend.byrow=T)
+ggsave(here("output","figures","GP-PA_vs-genRel_Roger-distance.png"),
+       width=7,height=5,scale=0.9)
+
+
+pa.rel |> filter(scenario %in% scenarios) |> 
+  ggplot(aes(y=corP, x=nb.genos.TS))+
+  scale_shape_manual(values=c(0:5), name="Prediction scenario")+
+  guides(shape=guide_legend(nrow=2), color=guide_legend(nrow=2))+
+  geom_hline(yintercept=0, linetype="dashed", color="grey70",linewidth=0.8)+
+  geom_smooth(method="lm", se=TRUE, color="black", linetype="dotted", linewidth=0.2)+
+  geom_point(stroke=1.3, size=2.2, aes(color=validSetBP, shape=scenario))+
+  geom_rug(sides="bl", mapping=aes(color=validSetBP), linewidth=0.3)+
+  #ggpmisc::stat_correlation(method="pearson", label.x = "left", label.y="top")+
+  ggpubr::stat_cor(cor.coef.name = "R")+
+  scale_color_manual(values=cols.bp, name="Validation set")+
+  labs(y="Predictive ability", x="Training set size")+
+  theme_bigstatsr(size.rel=0.8)+
+  theme(legend.position="bottom", legend.title.position="top", legend.byrow=T)
+ggsave(here("output","figures","GP-PA_vs-TrainSet-size.png"),
+       width=7,height=5,scale=0.9)
+
+# 
+# 
+# pa.rel |>
+#   filter(!scenario %in% "acAllBP", trainSetBP %in% c("SD","ND","MN","MT","NUR")) |> 
+#   ggplot(aes(x=corP, y=nb.genos.TS))+
+#   facet_wrap(~trainSetBP, scales="free")+
+#   scale_shape_manual(values=c(0:5), name="Prediction scenario")+
+#   geom_vline(xintercept=0, linetype="dashed", color="grey70",linewidth=0.8)+
+#   geom_smooth(method="lm", se=TRUE, color="black", linetype="dotted", linewidth=0.2)+
+#   geom_point(stroke=1.3, size=2.2, aes(color=validSetBP, shape=scenario))+
+#   geom_rug(sides="bl", mapping=aes(color=validSetBP), linewidth=0.3)+
+#   #ggpmisc::stat_correlation(method="pearson", label.x = "left", label.y="top")+
+#   ggpubr::stat_cor(cor.coef.name = "R")+
+#   scale_color_manual(values=cols, name="Validation set")+
+#   labs(x="Predictive ability", y="Training set size")+
+#   theme_bigstatsr(size.rel=0.8)+
+#   theme(legend.position="bottom", legend.title.position="top", legend.byrow=T)
+```
+
+## Linear model
+
+```{r}
+dat.mod <- all.res |> 
+  dplyr::select(-cohort.valid, -nb.genos.TS, -nb.genos.VS, -nb.snps) |> 
+  filter(scenario %in% c("wBP","acBP","acAllBP","nursBP")) |> 
+  left_join(dat$fitSummary[c("BP","trait","H2.Cullis","varG")], by=c("trainSetBP"="BP","trait")) |>
+  rename(H2Train=H2.Cullis, varGTrain=varG) |>
+  left_join(dat$fitSummary[c("BP","trait","H2.Cullis","varG")], by=c("validSetBP"="BP","trait")) |>
+  rename(H2Valid=H2.Cullis, varGValid=varG) |>
+  left_join(genRel, by=c("trait","scenario","trainSetBP","validSetBP")) 
+
+fit <- lm(corP ~ nb.genos.TS + nb.genos.VS + Roger_distance + 
+            H2Train + H2Valid + varGTrain + varGValid,
+          #+ Min.,+Median+Max.,
+          data=dat.mod)
+#summary(fit)
+st.fit <- step(fit)
+summary(st.fit)
+anova(st.fit)
+
+fit.fac <- lm(corP ~ scenario + trainSetBP + validSetBP + trait, data=dat.mod)
+st.fit.fac <- step(fit.fac)
+summary(st.fit.fac)
+anova(st.fit.fac)
+```
+
+# Genetic gain
+
+
+## Pull parameters
+
+Heritability from fit summary table
+```{r}
+df_h2 <- dat$fitSummary |> select(BP, trait, H2.Cullis) |> filter(!BP %in% "NUR") |> 
+  mutate(r_P=sqrt(H2.Cullis))
+```
+
+Predictive ability from NUR-all scenario
+```{r}
+df_pa <- all.res |> filter(scenario %in% "acBP", trainSetBP %in% "NUR") |> 
+  filter(!validSetBP %in% "NUR") |> rename(BP=validSetBP) |> select(BP, trait, corP)
+```
+
+## Calculate expected GP accuracy
+
+Combine the two tables and calculate expected genetic gain for phenotypic selection and genomic selection with the NUR-all scenario.
+
+If we consider $i$ and $sigma_A$ as constant, the matching accuracy from GP to have the same genetic gain 
+as phenotypic selection is: $r_{GP} = r_P \cdot \frac{L_{GP}}{L_P}$, considering here a reduction of the cycle length of one year.
+Similarly, for a given GP accuracy, the reduction in the cycle length needed to have the same genetic gain is: $L_{GP} = L_P \cdot \frac{r_{GP}}{r_P}$.
+```{r}
+L_P <- 5 ## cycle length for phenotypic selection
+dat_gain <- df_h2 |> left_join(df_pa, by=c("BP","trait")) |> 
+  mutate(r_exp_GP=r_P* (L_P-1)/L_P,
+         L_exp_GP=L_P * r_P/corP)
+```
+
+
+Plot results
+
+```{r}
+dat2plot <- dat_gain |> tidyr::pivot_longer(cols=c("r_P","r_exp_GP","corP")) |> 
+  mutate(name=factor(name, levels=c("corP","r_exp_GP","r_P")),
+         trait=forcats::fct_relevel(trait, traits))
+ggplot(dat2plot,aes(x=trait,y=value, color=BP, shape=name,group=BP))+
+  geom_line(data=filter(dat2plot, name %in% c("r_exp_GP","corP")), aes(group=paste0(BP,trait)),position=position_dodge(0.55), 
+            linewidth=1.2, alpha=0.7)+
+  geom_point(size=3, position=position_dodge(0.55), stroke=1.3)+
+  scale_shape_manual(label=c("r_P"="Accuracy of phenotypic selection",
+                             "r_exp_GP"="Target accuracy",
+                             "corP"="Current accuracy of genomic prediction"),
+                     values = c(15,17,4), name="Selection method")+
+  guides(shape=guide_legend(nrow=3, reverse = TRUE),
+         color=guide_legend(nrow=2))+
+  labs(y="Selection accuracy", x="Trait")+
+  theme_bigstatsr(size.rel=0.8)+
+  scale_color_manual(values=cols.bp, name="Breeding program")+
+  theme(legend.position="bottom", legend.title.position="top", legend.byrow=T)
+
+ggsave(here("output","figures","GP-expected-accuracy_for-same-genetic-gain.png"),
+       width=6,height=5,scale=0.95)
+```
+
+<!-- ## MN -->
+
+<!-- ```{r} -->
+<!-- ## DIS -->
+<!-- ### CV in the F6s -->
+<!-- p <- 1500/3000 -->
+<!-- i <- dnorm(qnorm(1-p))/p -->
+<!-- sigmaA <- sqrt(28.1) ## to take from fitSumm =  -->
+<!-- L_P <- 5 -->
+<!-- sqrt(dat$fitSummary$H2.Cullis) -->
+<!-- r_P <- 0.31 ## use h -->
+<!-- (deltaG_P <- (i * r_P * sigmaA)/L_P) -->
+
+
+<!-- ### with nursery -->
+<!-- r_GP <- 0.23 -->
+<!-- L_GP <- 4 -->
+<!-- (deltaG_GP<- (i * r_GP * sigmaA)/L_GP) -->
+<!-- ``` -->
+
+
+
+<!-- ```{r} -->
+<!-- (r_P * (L_P-1)/L_P) # r_GP to have -->
+
+<!-- (L_P * r_GP/r_P) ## L_GP to have -->
+<!-- ``` -->
+
+
+
+# Appendix
+
+```{r info}
+t1 <- proc.time(); t1 - t0
+print(sessionInfo(), locale=FALSE)
+```
+
+
