@@ -194,28 +194,6 @@ all.res |> filter(scenario %in% "wBP") |>
 ```
 
 
-<!-- ```{r} -->
-<!-- all.res |> -->
-<!--   filter(scenario %in% "wBP.co") |> #, !trainSetBP %in% "NUR") |>  -->
-<!--   group_by(trait, trainSetBP, cohort.valid) |>  -->
-<!--   summarize(corP=mean(corP),.groups="drop") |>  -->
-<!--   mutate(trainSetBP=factor(trainSetBP, levels=BP.lvls), -->
-<!--          trait=factor(trait, levels=traits)) |>  -->
-<!--   ggplot(aes(x=trainSetBP, y=trait,fill=corP, label=round(corP,2)))+ -->
-<!--   geom_tile(show.legend=F, color="white", linewidth=0.8) + -->
-<!--   scale_fill_gradientn( -->
-<!--     colours = c("red","orange","yellow","greenyellow","forestgreen"), -->
-<!--     limits=c(0,1),na.value = "grey80")+ -->
-<!--   #scale_fill_viridis_c() + -->
-<!--   labs(x="Validation Set",y="Trait", title="Scenario: within breeding program")+ -->
-<!--   geom_label(fill="white", linewidth=0,alpha=0.4,size=4) + -->
-<!--   bigstatsr::theme_bigstatsr(size.rel=0.8)+ -->
-<!--   theme(panel.grid=element_blank(), -->
-<!--         axis.text = element_text(size=rel(1.1))) -->
-<!-- plot(p.wBP) -->
-<!-- ``` -->
-
-
 
 ## acAllBP
 
@@ -508,147 +486,9 @@ ggsave(here("output","figures","GP-compare-scenarios_3-traits-corP.png"),
        width=8,height=7,scale=0.9)  
 ```
 
-<!-- ## Analyze effect of TPE -->
+# Compare use of nursery 
 
-<!-- ### Within TPE cross-validation -->
-
-<!-- ```{r res-wTPE} -->
-<!-- table(all.res$scenario) -->
-<!-- all.res |> filter(scenario %in% c("wTPE")) |> -->
-<!--   ggplot(aes(x=trainSetBP,y=trait, fill=corP, label=round(corP,3)))+ -->
-<!--   geom_tile(show.legend=F, color="white")+ -->
-<!--   geom_label(fill="white", linewidth=0,alpha=0.5, size=4.5)+ -->
-<!--   scale_fill_gradientn( -->
-<!--     colours = c("red","orange","yellow","greenyellow","forestgreen"), -->
-<!--     limits=c(0,1),na.value = "grey80")+ -->
-<!--   labs(y="Training set", x="Training and validation set", title="Scenario: within TPE")+ -->
-<!--   bigstatsr::theme_bigstatsr(size.rel=0.8)+ -->
-<!--   theme(axis.text = element_text(size=rel(1.1))) -->
-<!-- ggsave(here("output","figures","GP-heatmap_wTPE-corP.png"), -->
-<!--        width=7,height=6,scale=0.9) -->
-<!-- ``` -->
-
-<!-- ### Nursery TPE to breeding program -->
-
-<!-- Add results from acBP-NUR for comparison -->
-
-<!-- ```{r acTPE, fig.height=6} -->
-<!-- traits.tpe <- unique(all.res |> filter(scenario %in% "acTPE") |> pull(trait)) -->
-<!-- bind_rows( -->
-<!--   all.res |> filter(scenario %in% "acTPE"), -->
-<!--   all.res |> filter(scenario %in% "acBP", trainSetBP %in% "NUR")) |> -->
-<!--   mutate(trainSetBP=gsub(pattern="^NUR-",replacement="",trainSetBP), -->
-<!--          trainSetBP=gsub(pattern="-TPE$",replacement="",trainSetBP), -->
-<!--          trainSetBP=forcats::fct_relevel(trainSetBP, BP.lvls)) |> -->
-<!--   filter(trait %in% traits.tpe) |> -->
-<!--   ggplot(aes(x=trainSetBP, y=validSetBP, fill=corP, label=round(corP,2)))+ -->
-<!--   facet_wrap(~trait, scales="free", nrow=3)+ -->
-<!--   #scale_x_discrete(guide = guide_axis(n.dodge = 2))+ -->
-<!--   geom_tile(show.legend=F, color="white",linewidth=0.8)+ -->
-<!--   geom_label(fill="white", linewidth=0,alpha=0.5, size=4)+ -->
-<!--   scale_fill_gradientn( -->
-<!--     colours = c("red","orange","yellow","greenyellow","forestgreen"), -->
-<!--     limits=c(0,1),na.value = "grey80")+ -->
-<!--   labs(y="Validation set", x="Training set", title="Scenario: across TPE")+ -->
-<!--   bigstatsr::theme_bigstatsr(size.rel=0.8)+ -->
-<!--   theme(axis.text = element_text(size=rel(1.1))) -->
-<!-- ggsave(here("output","figures","GP-heatmap_acTPE-vs-acBP-NUR-corP.png"), -->
-<!--        width=10,height=7,scale=0.9) -->
-<!-- ``` -->
-
-# Other comparisons
-
-## wBP new cohort
-
-```{r CV-vs-new-cohort}
-#fct.lvl <- c("NUR-all",paste0("NUR-since",seq(2000,2020, by=5)))
-dat2plot <- bind_rows(
-  all.res |> filter(!trainSetBP %in% "NUR",scenario %in% c("wBP")),
-  all.res |> filter(scenario %in% c("wBP.co"))) |> 
-  mutate(TS=ifelse(scenario %in% "wBP", paste0(trainSetBP,"-CV"),
-                   paste0("BP-",cohort.valid)))
-#mutate(trainSetBP=fct_recode(trainSetBP, "NUR-all"="NUR")) 
-#mutate(trainSetBP=factor(trainSetBP, fct.lvl))
-
-cols <- c("grey30", paletteer::paletteer_c("ggthemes::Classic Green", n=5, direction = -1))
-
-#tapply(dat2plot$corP, dat2plot$trainSetBP, summary)
-
-# ggplot(dat2plot,aes(x=corP, y=trait,fill=TS))+ 
-#   facet_wrap(~validSetBP, scales="fixed")+
-#   labs(x="Pearson correlation",y="Trait")+ 
-#   # scale_fill_manual(values=cols,
-#   #                   labels=c("NUR-all"="NUR-all",
-#   #                            "NUR-since2000"="NUR since 2000",
-#   #                            "NUR-since2005"="NUR since 2005",
-#   #                            "NUR-since2010"="NUR since 2010",
-#   #                            "NUR-since2015"="NUR since 2015",
-#   #                            "NUR-since2020"="NUR since 2020"),
-#   #                   name="Training set composition")+
-#   guides(fill=guide_legend(nrow=2))+
-#   bigstatsr::theme_bigstatsr(size.rel=0.8)+ 
-#   geom_col(position=position_dodge(0.9),colour = "white")+ 
-#   theme(legend.position="bottom", 
-#         legend.title.position="top", 
-#         legend.byrow=T, 
-#         strip.background=element_rect(color=NA), 
-#         panel.border = element_rect(color="grey85"))
-# ggsave(here("output","figures","GP-wBP-scenarios_predict-new-cohort.png"),
-#        width=7,height=7,scale=0.8)
-
-## define color scale: -CV as cols.bp and other years as gradient
-cols.tmp <- c("MN-CV"="#7a0019","ND-CV"="#2E8B57","SD-CV"="#3A5FCD","MT-CV"="#bd9b04")
-cols.tmp <- c(cols.tmp, paletteer::paletteer_c("oompaBase::greyscale", n=9, direction = -1))
-names(cols.tmp) <- c(names(cols.tmp)[1:4], paste0("BP-",seq(2017,2025, by=1)))
-
-dat2plot |> filter(!validSetBP %in% "ND") |> 
-  mutate(TS.def=as.character(fct_recode(TS, "BP"="MN-CV","BP"="ND-CV","BP"="SD-CV","BP"="MT-CV"))) |>
-  ggplot(aes(x=corP, y=TS.def,fill=TS))+ 
-  facet_grid(validSetBP~trait, scales="fixed")+
-  labs(x="Pearson correlation",y="Validation set")+
-  geom_col(position=position_dodge(0.9))+
-  theme_bigstatsr(size.rel=0.8)+
-  scale_x_continuous(breaks = seq(-0.4,0.5,by=0.2))+
-  scale_fill_manual(values=cols.tmp, name="Validation set composition")+
-  theme(legend.position="none")
-ggsave(here("output","figures","GP-wBP-scenarios_predict-new-cohort.png"),
-       width=10,height=7,scale=0.9)
-# dat2plot |> filter(!validSetBP %in% "ND") |> 
-#   mutate(TS.def=as.character(fct_recode(TS, "BP"="MN-CV", "BP"="ND-CV", "BP"="SD-CV", "BP"="MT-CV"))) |>
-#   ggplot(aes(y=TS.def, x=trait, fill=corP))+
-#   facet_wrap(~validSetBP)+
-#   geom_tile()
-#   #theme(axis.text.x=element_text(angle=90))
-
-```
-
-
-## acBPAll Training set optimization
-
-```{r}
-dat2plot <- all.res |> filter(scenario %in% c("acAllBP","TSoptiBP"),
-                              !validSetBP %in% "NUR") 
-tapply(dat2plot$corP, dat2plot$scenario, summary)
-ggplot(dat2plot, aes(x=trait, y=corP, fill=scenario))+
-  facet_wrap(~validSetBP)+
-  geom_col(position="dodge")+
-  theme_bigstatsr(size.rel=0.8)+
-  scale_fill_manual(values=c("acAllBP"="grey70","TSoptiBP"="brown1"),
-                    name="Prediction scenario",
-                    labels=c("acAllBP"="all genotypes","TSoptiBP"="optimized TS"))+
-  labs(y="Predictive ability", x="Trait")+
-  theme(legend.position="bottom",
-        legend.byrow=T, 
-        strip.background=element_rect(color=NA), 
-        panel.border = element_rect(color="grey85"))
-ggsave(here("output","figures","GP-compare-scenarios_acAllBP_TSoptiBP_corP.png"),
-       width=7,height=6,scale=0.8)
-```
-
-
-## Compare use of nursery 
-
-### Nursery, subset or not by BP
+## Nursery, subset or not by BP
 
 ```{r}
 dat2plot <- bind_rows(
@@ -710,19 +550,19 @@ dat2plot |>
 
 
 
-### Include only the most recent genotypes
+## Include only the most recent genotypes
 
 Data formatting
 
 ```{r}
 dat2plot <- bind_rows(
-  all.res |> select(-nb.genos.TS, -nb.genos.VS, -nb.snps,-cohort.valid) |> 
+  all.res |> select(-nb.genos.TS, -nb.genos.VS, -nb.snps) |> 
     filter(trainSetBP %in% "NUR",scenario %in% c("acBP")) |>
     left_join(genRel |> filter(trainSetBP %in% "NUR", scenario %in% "acBP"),
               by=c("trainSetBP","validSetBP","trait","scenario")),
   all.res |> filter(scenario %in% c("acBP-NUR-sinceDate"))) |> 
   mutate(trainSetBP=fct_recode(trainSetBP, "NUR-all"="all")) |> 
-  select(-nb.snps,-cohort.valid) 
+  select(-nb.snps) 
 
 genRel_acBP <- genRel |> 
   filter(scenario %in% "acBP_sinceDate") |> 
@@ -863,130 +703,6 @@ ggplot(dat2plot,aes(y=corP, x=trait,fill=trainSetBP))+
 ggsave(here("output","figures","GP-compare-nursery-scenarios_subset-URN-URSN-corP.png"),
        width=7,height=5,scale=0.85)
 ```
-
-
-<!-- ```{r} -->
-<!-- ggdraw()+ -->
-<!--   draw_plot(g2, x=0, y=0, width=1, height=0.7)+ -->
-<!--   draw_plot(gTS, x=0.6, y=0.01, width=.38, height=0.2, scale=1) -->
-
-<!-- ggsave(here("output","figures","GP-compare-nursery-scenarios_sinceDate-genos_corP_with-nTS.png"), -->
-<!--        width=9,height=10,scale=0.9) -->
-<!-- ``` -->
-
-
-
-<!-- ### BRR method for including a variance-specific for each BP -->
-
-<!-- ```{r} -->
-<!-- dat2plot <-all.res |> filter(scenario %in% c("acAllBP_varBP","acAllBP"), !validSetBP %in% "NUR") -->
-<!-- tapply(dat2plot$corP, dat2plot$scenario, summary) -->
-
-<!-- ## stat test -->
-<!-- dat.wide <- tidyr::pivot_wider(dat2plot, id_cols=c("trait","validSetBP"),  -->
-<!--                                names_from = scenario, values_from = corP) -->
-<!-- cor(dat.wide$acAllBP, dat.wide$acAllBP_varBP, use="complete.obs") -->
-<!-- wilcox.test(dat.wide$acAllBP, dat.wide$acAllBP_varBP, paired=T) -->
-<!-- ## plot -->
-<!-- ggplot(dat2plot,aes(x=corP, y=trait,fill=scenario))+  -->
-<!--   facet_wrap(~validSetBP, scales="free_y")+ -->
-<!--   labs(x="Pearson correlation",y="Trait")+  -->
-<!--   scale_fill_manual(values=c("acAllBP"="grey60","acAllBP_varBP"="maroon"))+ -->
-<!--   bigstatsr::theme_bigstatsr(size.rel=0.8)+  -->
-<!--   geom_col(position="dodge")+  -->
-<!--   theme(legend.position="bottom",  -->
-<!--         legend.title.position="top",  -->
-<!--         legend.byrow=T,  -->
-<!--         strip.background=element_rect(color=NA),  -->
-<!--         panel.border = element_rect(color="grey85")) -->
-<!-- ggsave(here("output","figures","GP-compare-scenarios_acAllBP_varBP_corP.png"), -->
-<!--        width=7,height=6,scale=0.8) -->
-<!-- ``` -->
-
-
-<!-- ### Training set size effect: resampling ND genotypes -->
-
-<!-- ```{r} -->
-<!-- dat2plot <-all.res |> filter(scenario %in% c("acAllBP.resampND","acAllBP"), -->
-<!--                              !validSetBP %in% c("NUR","ND")) -->
-<!-- tapply(dat2plot$corP, dat2plot$scenario, summary) -->
-
-<!-- ## stat test -->
-<!-- dat.wide <- tidyr::pivot_wider(dat2plot, id_cols=c("trait","validSetBP"),  -->
-<!--                                names_from = scenario, values_from = corP) -->
-<!-- cor(dat.wide$acAllBP, dat.wide$acAllBP.resampND, use="complete.obs") -->
-<!-- wilcox.test(dat.wide$acAllBP, dat.wide$acAllBP.resampND, paired=T) -->
-
-<!-- ## plot -->
-<!-- ggplot(dat2plot,aes(x=corP, y=trait,fill=scenario))+  -->
-<!--   facet_wrap(~validSetBP, scales="free_y")+ -->
-<!--   labs(x="Pearson correlation",y="Trait")+  -->
-<!--   scale_fill_manual(values=c("acAllBP"="grey70","acAllBP.resampND"="forestgreen"))+ -->
-<!--   bigstatsr::theme_bigstatsr(size.rel=0.8)+  -->
-<!--   geom_col(position="dodge")+  -->
-<!--   theme(legend.position="bottom",  -->
-<!--         legend.title.position="top",  -->
-<!--         legend.byrow=T,  -->
-<!--         strip.background=element_rect(color=NA),  -->
-<!--         panel.border = element_rect(color="grey85")) -->
-<!-- ggsave(here("output","figures","GP-compare-scenarios_acAllBP.resampND_corP.png"), -->
-<!--        width=7,height=6,scale=0.8) -->
-<!-- ``` -->
-
-### Compare the ND wheat classes
-
-```{r}
-dat2plot <-all.res |> filter(scenario %in% c("acBP_NDwheatClass","acBP"),
-                             trainSetBP %in% c("ND","ND-RED","ND-WHITE"),
-                             !validSetBP %in% "NUR", trait %in% "DIS")
-tapply(dat2plot$corP, dat2plot$trainSetBP, summary)
-
-
-## stat test
-dat.wide <- tidyr::pivot_wider(dat2plot,
-                               id_cols=c("trait","validSetBP"), 
-                               names_from = trainSetBP, values_from = corP)
-cor(dat.wide$ND, dat.wide$`ND-WHITE`, use="complete.obs")
-wilcox.test(dat.wide$ND, dat.wide$`ND-WHITE`, paired=T)
-
-cor(dat.wide$ND, dat.wide$`ND-RED`, use="complete.obs")
-wilcox.test(dat.wide$ND, dat.wide$`ND-RED`, paired=T)
-
-## plot
-ggplot(dat2plot,aes(x=corP, y=validSetBP,fill=trainSetBP))+ 
-  #facet_wrap(~validSetBP, scales="fixed")+
-  labs(x="Pearson correlation",y="Trait")+
-  scale_fill_manual(values=c("ND"="grey60","ND-RED"="#D40F7DFF","ND-WHITE"="wheat"),
-                    name="Training set")+
-  bigstatsr::theme_bigstatsr(size.rel=0.8)+
-  geom_col(position=position_dodge(0.9),colour = "white")+
-  theme(legend.position="bottom",
-        legend.title.position="top")
-ggsave(here("output","figures","GP-compare-scenarios_acBP_NDwheatClass_DIS_corP.png"),
-       width=7,height=5,scale=0.8)
-```
-
-
-
-<!-- ## Effect of training set optimization -->
-
-<!-- ```{r} -->
-<!-- all.res |> filter(nb.genos.VS != 0 | is.na(nb.genos.VS), -->
-<!--                   scenario %in% c("TSoptiBP","acAllBP")) |>  -->
-<!--   ggplot(aes(y=corP, x=validSetBP,fill=scenario))+ -->
-<!--   facet_wrap(~trait)+ -->
-<!--   labs(y="Pearson correlation",x="Validation set")+ -->
-<!--   scale_fill_manual(values=c("TSoptiBP"="dodgerblue","acAllBP"="grey50"), -->
-<!--                     name="Prediction scenario")+ -->
-<!--   bigstatsr::theme_bigstatsr(size.rel=0.8)+ -->
-<!--   geom_col(position="dodge")+ -->
-<!--   theme(legend.position="bottom", -->
-<!--         legend.title.position="top", -->
-<!--         legend.byrow=T, -->
-<!--         strip.background=element_rect(color=NA), -->
-<!--         panel.border = element_rect(color="grey85")) -->
-
-<!-- ``` -->
 
 
 # Study variables impacting the predictive ability
@@ -1134,16 +850,6 @@ genRel |> filter(scenario %in% c("acBP","acAllBP"), trainSetBP %in% c("NUR","All
   summarize(mean_nb.genos.TS=mean(nb.genos.TS),.by=scenario)
 ```
 
-
-<!-- ```{r} -->
-<!-- acAll <- all.res |> filter(!is.na(h2Val)) -->
-<!-- fit <- lm(formula=corP ~ h2Train + h2Val + nb.genos.TS + nb.genos.VS+Mean, -->
-<!--           data=acAll) -->
-<!-- summary(fit) -->
-<!-- st.fit <- step(fit) -->
-<!-- summary(st.fit) -->
-<!-- ``` -->
-
 ```{r}
 dat2plot <- all.res |> filter(scenario %in% c("acBP")) |> 
   left_join(dat$fitSummary, by=c("trait","trainSetBP"="BP")) |> 
@@ -1271,7 +977,7 @@ ggsave(here("output","figures","GP-PA_vs-TrainSet-size.png"),
 
 ```{r}
 dat.mod <- all.res |> 
-  dplyr::select(-cohort.valid, -nb.genos.TS, -nb.genos.VS, -nb.snps) |> 
+  dplyr::select( -nb.genos.TS, -nb.genos.VS, -nb.snps) |> 
   filter(scenario %in% c("wBP","acBP","acAllBP","nursBP")) |> 
   left_join(dat$fitSummary[c("BP","trait","H2.Cullis","varG")], by=c("trainSetBP"="BP","trait")) |>
   rename(H2Train=H2.Cullis, varGTrain=varG) |>
@@ -1293,91 +999,6 @@ st.fit.fac <- step(fit.fac)
 summary(st.fit.fac)
 anova(st.fit.fac)
 ```
-
-# Genetic gain
-
-
-## Pull parameters
-
-Heritability from fit summary table
-```{r}
-df_h2 <- dat$fitSummary |> select(BP, trait, H2.Cullis) |> filter(!BP %in% "NUR") |> 
-  mutate(r_P=sqrt(H2.Cullis))
-```
-
-Predictive ability from NUR-all scenario
-```{r}
-df_pa <- all.res |> filter(scenario %in% "acBP", trainSetBP %in% "NUR") |> 
-  filter(!validSetBP %in% "NUR") |> rename(BP=validSetBP) |> select(BP, trait, corP)
-```
-
-## Calculate expected GP accuracy
-
-Combine the two tables and calculate expected genetic gain for phenotypic selection and genomic selection with the NUR-all scenario.
-
-If we consider $i$ and $sigma_A$ as constant, the matching accuracy from GP to have the same genetic gain 
-as phenotypic selection is: $r_{GP} = r_P \cdot \frac{L_{GP}}{L_P}$, considering here a reduction of the cycle length of one year.
-Similarly, for a given GP accuracy, the reduction in the cycle length needed to have the same genetic gain is: $L_{GP} = L_P \cdot \frac{r_{GP}}{r_P}$.
-```{r}
-L_P <- 5 ## cycle length for phenotypic selection
-dat_gain <- df_h2 |> left_join(df_pa, by=c("BP","trait")) |> 
-  mutate(r_exp_GP=r_P* (L_P-1)/L_P,
-         L_exp_GP=L_P * r_P/corP)
-```
-
-
-Plot results
-
-```{r}
-dat2plot <- dat_gain |> tidyr::pivot_longer(cols=c("r_P","r_exp_GP","corP")) |> 
-  mutate(name=factor(name, levels=c("corP","r_exp_GP","r_P")),
-         trait=forcats::fct_relevel(trait, traits))
-ggplot(dat2plot,aes(x=trait,y=value, color=BP, shape=name,group=BP))+
-  geom_line(data=filter(dat2plot, name %in% c("r_exp_GP","corP")), aes(group=paste0(BP,trait)),position=position_dodge(0.55), 
-            linewidth=1.2, alpha=0.7)+
-  geom_point(size=3, position=position_dodge(0.55), stroke=1.3)+
-  scale_shape_manual(label=c("r_P"="Accuracy of phenotypic selection",
-                             "r_exp_GP"="Target accuracy",
-                             "corP"="Current accuracy of genomic prediction"),
-                     values = c(15,17,4), name="Selection method")+
-  guides(shape=guide_legend(nrow=3, reverse = TRUE),
-         color=guide_legend(nrow=2))+
-  labs(y="Selection accuracy", x="Trait")+
-  theme_bigstatsr(size.rel=0.8)+
-  scale_color_manual(values=cols.bp, name="Breeding program")+
-  theme(legend.position="bottom", legend.title.position="top", legend.byrow=T)
-
-ggsave(here("output","figures","GP-expected-accuracy_for-same-genetic-gain.png"),
-       width=6,height=5,scale=0.95)
-```
-
-<!-- ## MN -->
-
-<!-- ```{r} -->
-<!-- ## DIS -->
-<!-- ### CV in the F6s -->
-<!-- p <- 1500/3000 -->
-<!-- i <- dnorm(qnorm(1-p))/p -->
-<!-- sigmaA <- sqrt(28.1) ## to take from fitSumm =  -->
-<!-- L_P <- 5 -->
-<!-- sqrt(dat$fitSummary$H2.Cullis) -->
-<!-- r_P <- 0.31 ## use h -->
-<!-- (deltaG_P <- (i * r_P * sigmaA)/L_P) -->
-
-
-<!-- ### with nursery -->
-<!-- r_GP <- 0.23 -->
-<!-- L_GP <- 4 -->
-<!-- (deltaG_GP<- (i * r_GP * sigmaA)/L_GP) -->
-<!-- ``` -->
-
-
-
-<!-- ```{r} -->
-<!-- (r_P * (L_P-1)/L_P) # r_GP to have -->
-
-<!-- (L_P * r_GP/r_P) ## L_GP to have -->
-<!-- ``` -->
 
 
 

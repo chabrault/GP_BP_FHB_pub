@@ -1,0 +1,13 @@
+"trait"	"validSetBP"	"corP"	"GP.method"	"trainSetBP"	"scenario"	"nb.genos.TS"	"nb.genos.VS"
+"DIS"	"MN"	0.141	"GBLUP"	"NUR-since2010"	"acBP-NUR-sinceDate"	528	703
+"DIS"	"MT"	0.268	"GBLUP"	"NUR-since2010"	"acBP-NUR-sinceDate"	528	141
+"DIS"	"ND"	0.214	"GBLUP"	"NUR-since2010"	"acBP-NUR-sinceDate"	528	2281
+"DIS"	"SD"	0.168	"GBLUP"	"NUR-since2010"	"acBP-NUR-sinceDate"	528	633
+"DON"	"MN"	0.088	"GBLUP"	"NUR-since2010"	"acBP-NUR-sinceDate"	528	353
+"DON"	"MT"	0.311	"GBLUP"	"NUR-since2010"	"acBP-NUR-sinceDate"	528	141
+"DON"	"ND"	0.081	"GBLUP"	"NUR-since2010"	"acBP-NUR-sinceDate"	528	948
+"DON"	"SD"	0.101	"GBLUP"	"NUR-since2010"	"acBP-NUR-sinceDate"	528	530
+"VSK"	"MN"	0.189	"GBLUP"	"NUR-since2010"	"acBP-NUR-sinceDate"	528	703
+"VSK"	"MT"	0.274	"GBLUP"	"NUR-since2010"	"acBP-NUR-sinceDate"	528	105
+"VSK"	"ND"	0.216	"GBLUP"	"NUR-since2010"	"acBP-NUR-sinceDate"	528	956
+"VSK"	"SD"	0.246	"GBLUP"	"NUR-since2010"	"acBP-NUR-sinceDate"	528	622

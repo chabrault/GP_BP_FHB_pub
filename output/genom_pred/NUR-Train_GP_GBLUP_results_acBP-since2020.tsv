@@ -1,0 +1,13 @@
+"trait"	"validSetBP"	"corP"	"GP.method"	"trainSetBP"	"scenario"	"nb.genos.TS"	"nb.genos.VS"
+"DIS"	"MN"	-0.035	"GBLUP"	"NUR-since2020"	"acBP-NUR-sinceDate"	185	703
+"DIS"	"MT"	0.297	"GBLUP"	"NUR-since2020"	"acBP-NUR-sinceDate"	185	141
+"DIS"	"ND"	0.1	"GBLUP"	"NUR-since2020"	"acBP-NUR-sinceDate"	185	2281
+"DIS"	"SD"	0.177	"GBLUP"	"NUR-since2020"	"acBP-NUR-sinceDate"	185	633
+"DON"	"MN"	0.049	"GBLUP"	"NUR-since2020"	"acBP-NUR-sinceDate"	185	353
+"DON"	"MT"	0.233	"GBLUP"	"NUR-since2020"	"acBP-NUR-sinceDate"	185	141
+"DON"	"ND"	0.036	"GBLUP"	"NUR-since2020"	"acBP-NUR-sinceDate"	185	948
+"DON"	"SD"	0.156	"GBLUP"	"NUR-since2020"	"acBP-NUR-sinceDate"	185	530
+"VSK"	"MN"	0.196	"GBLUP"	"NUR-since2020"	"acBP-NUR-sinceDate"	185	703
+"VSK"	"MT"	0.166	"GBLUP"	"NUR-since2020"	"acBP-NUR-sinceDate"	185	105
+"VSK"	"ND"	0.198	"GBLUP"	"NUR-since2020"	"acBP-NUR-sinceDate"	185	956
+"VSK"	"SD"	0.189	"GBLUP"	"NUR-since2020"	"acBP-NUR-sinceDate"	185	622

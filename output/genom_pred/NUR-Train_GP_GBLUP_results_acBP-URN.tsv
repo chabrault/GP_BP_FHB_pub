@@ -1,0 +1,13 @@
+"trait"	"validSetBP"	"corP"	"GP.method"	"trainSetBP"	"scenario"	"nb.genos.TS"	"nb.genos.VS"
+"DIS"	"MN"	0.042	"GBLUP"	"URN"	"acBP-NUR"	531	703
+"DIS"	"MT"	0.189	"GBLUP"	"URN"	"acBP-NUR"	531	141
+"DIS"	"ND"	0.268	"GBLUP"	"URN"	"acBP-NUR"	531	2281
+"DIS"	"SD"	0.2	"GBLUP"	"URN"	"acBP-NUR"	531	633
+"DON"	"MN"	0.108	"GBLUP"	"URN"	"acBP-NUR"	531	353
+"DON"	"MT"	0.227	"GBLUP"	"URN"	"acBP-NUR"	531	141
+"DON"	"ND"	0.152	"GBLUP"	"URN"	"acBP-NUR"	531	948
+"DON"	"SD"	0.142	"GBLUP"	"URN"	"acBP-NUR"	531	530
+"VSK"	"MN"	0.126	"GBLUP"	"URN"	"acBP-NUR"	531	703
+"VSK"	"MT"	0.37	"GBLUP"	"URN"	"acBP-NUR"	531	105
+"VSK"	"ND"	0.226	"GBLUP"	"URN"	"acBP-NUR"	531	956
+"VSK"	"SD"	0.168	"GBLUP"	"URN"	"acBP-NUR"	531	622
