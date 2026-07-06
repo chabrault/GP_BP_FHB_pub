@@ -27,6 +27,7 @@ suppressPackageStartupMessages(library(gtExtras)) # summary tables
 suppressPackageStartupMessages(library(ggpubr)) # nice plots
 suppressPackageStartupMessages(library(patchwork)) # combine plots
 suppressPackageStartupMessages(library(cowplot)) # combine plots
+suppressPackageStartupMessages(library(forcats)) # handle factor levels
 library(HRSWGS)
 ```
 
@@ -92,13 +93,6 @@ ggplot(wBP, aes(x=obs, y=pred))+
 ggsave(here("output","figures","GP-obs-vs-pred_wBP.png"),width=7,height=5,scale=0.85)
 ```
 
-Predictive ability RKHS for wBP
-```{r wBP-plot-res-RKHS}
-obs.pred.wBP <- readRDS(here("output","genom_pred","observed-vs-predicted_wBP_RKHS.rds"))$MT
-obs.pred.wBP |>  
-  group_by(trait) |> 
-  summarize(corP=round(cor(obs,pred),3), n=n(), .groups="drop") 
-```
 
 
 
@@ -229,7 +223,6 @@ PA.NUR <- bind_rows(PA.NUR.all, PA.NUR.co)
 
 
 ```{r}
-library(forcats)
 cols.tmp <- c("MN"="#7a0019","ND"="#2E8B57","SD"="#3A5FCD","MT"="#bd9b04")
 cols.tmp <- c(cols.tmp, paletteer::paletteer_c("oompaBase::greyscale", n=9, direction = -1))
 names(cols.tmp) <- c(names(cols.tmp)[1:4], paste0("BP-",seq(2017,2025, by=1)))
