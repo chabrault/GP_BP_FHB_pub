@@ -20,7 +20,7 @@ knitr::include_graphics("../output/figures/PCA_inds_geno_NUR-all-BPs.png", error
 - [Extract genetic relationship between prediction scenarios](extract_gen-rel_prediction-scenario.html). In this script, we estimate the genetic relatedness between the training and the testing sets for the different prediction scenarios. We compare the Roger's distance between the scenarios.
 
 ```{r, echo=FALSE, out.width = '70%', fig.cap='Genetic distance between training and validation sets for the NURS vs. NURS-from-BP scenarios'}
-knitr::include_graphics("../output/figures/GP-genetic-relatedness-Rdist_NURS_vs_NURS-from-BP_VSK.png", error = FALSE)
+knitr::include_graphics("../output/figures/GP-genetic-relatedness-Rdist_NURS_vs_NURS-from-BP.png", error = FALSE)
 ```
 
 
