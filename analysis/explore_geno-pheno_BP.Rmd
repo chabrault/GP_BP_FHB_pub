@@ -63,8 +63,6 @@ trait.pal <- c(
 
 # Load combined data
 
-Generated in `HRSW_BP_BP/analysis/format_inputs_FHB.Rmd`.
-
 ```{r}
 p2f.input <- here("data","inputs_GP_BP_FHB.rds")
 file.mtime(p2f.input) #"2026-03-06 13:37:01 CST"
@@ -104,7 +102,6 @@ table(pheno$NUR.BP)
 ```
 
 
-
 ## Location GPS coordinates
 
 ```{r}
@@ -112,7 +109,6 @@ trial.coord <- fread(here("data","BP_TPE_LOC.csv"))
 ## filter on the locations used for scab screening
 
 ```
-
 
 
 # Number of genotypes
@@ -535,6 +531,7 @@ ggsave(here("output","figures","Expe-design_nGeno-by-year_all-BPs.png"),
 ```
 
 
+
 ## Study fit information
 
 
@@ -544,6 +541,9 @@ Heritability vs number of observations
 #   ggplot(aes(x=H2.Cullis, y=nobs, color=BP, size=nenvs))+
 #   facet_wrap(~trait, scales="free")+
 #   geom_point()
+summary(fitSummary$H2.Cullis)
+tapply(fitSummary$H2.Cullis, fitSummary$trait, summary)
+tapply(fitSummary$H2.Cullis, fitSummary$BP, summary)
 
 fitSummary |> filter(trait %in% traits) |> 
   ggplot(aes(y=H2.Cullis, x=nobs))+
@@ -572,6 +572,21 @@ ggsave(here("output","figures","Fit-summary_H2-Cullis_by-trait_BP.png"),
        width=7, height=6, scale=0.85)
 ```
 
+<!-- Heritability by BP -->
+
+<!-- ```{r} -->
+<!-- fitSummary |> filter(trait %in% traits) |> -->
+<!--   ggplot(aes(x=H2.Cullis, y=trait, fill=BP))+ -->
+<!--   geom_col(position = position_dodge2(preserve = "single"), width=0.9)+ -->
+<!--   bigstatsr::theme_bigstatsr(size.rel=0.8)+ -->
+<!--   scale_x_continuous(breaks=seq(0,1,0.2))+ -->
+<!--   scale_fill_manual(values=cols, name="Breeding program")+ -->
+<!--   labs(y="Trait", x="Heritability")+ -->
+<!--   theme(legend.position="bottom", -->
+<!--         legend.title.position="top") -->
+<!-- ggsave(here("output","figures","Fit-summary_heritability_by-BP.png"), -->
+<!--        width=7, height=6, scale=0.85) -->
+<!-- ``` -->
 
 Export table of fit information as supplementary table?
 

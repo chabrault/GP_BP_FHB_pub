@@ -1,5 +1,5 @@
 
-This Read Me file was generated on 2026-07-02 by Charlotte Brault
+This Read Me file was generated on 2026-11-03 by Charlotte Brault
 
 
 # General information
@@ -58,34 +58,36 @@ Licenses/restrictions placed on the data: GNU-GPL3
 
 ## Data
 
-- `data/URSN_trial_info.csv` GPS coordinates of the URSN trial locations.
+- `data/BP_TPE_LOC.csv` GPS coordinates of the URN and URSN trial locations.
 
-- `data/dat_FHB_URSN_URNFHB.tsv` Curated phenotypic data for the URSN population and for the URN population for FHB traits.
-
-- `data/all_inputs_URN_URSN_URNFHB.rds` List of formatted inputs.
-
-- `data/genotype_information_URN_URSN_URNFHB.tsv` Table of genomic information for URN and URSN populations, notably their source and first year of testing.
+- `data/inputs_GP_BP_FHB.rds` List of formatted inputs.
 
 
 ## Analysis scripts
 
 ### Inputs
 
-- `analysis/explore_inputs.Rmd` In this script, we load the phenotypic data, explore the experimental design, the phenotypic correlations and the genetic composition of the URN and the URSN populations.
+- `analysis/explore_geno-pheno_BP.Rmd` In this script, we load the phenotypic data, explore the experimental design, 
+the phenotypic correlations and the genetic composition of the breeding programs and of the URN and the URSN populations.
 
-- `analysis/extract_genoVal_URN_URSN_FHB.Rmd` In this script, we load the phenotypic data for the FHB traits and extract the BLUEs (Best Linear Unbiased Estimators) for the genotypes in the URN and URSN populations. The BLUEs are used as inputs for the genetic gain analysis and the QTL analysis.
+- `analysis/extract_gen-rel_prediction-scenario.Rmd` In this script, we load the input and determines the training and testing sets for the various prediction scenarios. 
+For each prediction fold, we estimate the genetic relatedness between the training and testing sets and we save the results in the tsv file" `output/genom-pred_all-scenarios_genetic-relatedness_Rdist.tsv`. 
 
-- `analysis/extract_genoVal_URN.Rmd` In this script, we load the phenotypic data for the agronomic traits and extract the BLUEs for the genotypes in the URN population. The BLUEs are used as inputs for the genetic gain analysis.
 
-#### Genetic gain
 
-- `analysis/URN_URSN_FHB_GGAIN_BLUEs.Rmd`. In this script, we load the BLUEs for the FHB traits and the URSN trial information, we compute the genetic gain for three FHB traits (DIS, VSK and DON) in the URSN population and compare it with the genetic gain in the URN population.
+### Genomic prediction
 
-### FHB QTLs
+- `analysis/genom_pred_btw-BP.Rmd` In this script, we perform genomic prediction of FHB resistance across breeding programs with various prediction scenarios. 
+The results are combined and saved in the tsv file `output/genom-pred_all-scenarios_GBLUP-method_BPs_pred-ab.tsv`.
 
-- `analysis/URN_URSN_QTL_frequency.Rmd`. In this script, we load phenotypic data and environmental covariates (ECs), we apply Finlay-Wilkinson regression to predict reaction norm intercept, slope, and phenotypic values based on mean phenotype and ECs. We compare the results with genomic prediction.
 
-- `analysis/explore_FHB_QTL_effect_URN-URSN.Rmd`. In this script, we load the BLUEs from the phenoypic data for all the traits and the FHB QTLs for the URN and URSN populations, we explore the effect of the FHB QTLs on the FHB traits (DIS, VSK and DON) and on three agronomic traits (HT, PH and YLD).
+### Analyze results
+
+- `analysis/analyze_genom_pred.Rmd` In this script, we analyze the results of the genomic prediction across breeding programs and we generate the figures and tables for the manuscript. 
+
+- `analysis/analyze_GP_obs_pred.Rmd` In this script, we analyze the results of the genomic prediction across breeding programs and we generate the figures and tables for the manuscript.
+
+- `analysis/pred-ability_response_culling.Rmd`. In this script, we simulate two correlated variables for a range of predictive ability and culling fraction and we estimate the true positive rate.
 
 ### Other
 
@@ -103,4 +105,4 @@ Licenses/restrictions placed on the data: GNU-GPL3
 
 # Software and versions
 
-- R version v4.5.3 and RStudio v2025.09.0+387
+- R version v4.6.1 and RStudio v2026.10.1

@@ -269,6 +269,58 @@ pred.df |>
 
 ```
 
+
+
+# Explore ND & NUR-ALL vs. NUR-BP & VSK
+
+## Format obs vs. pred
+
+
+```{r}
+nd <- bind_rows(bind_rows(all.pred$acBP) |> 
+  filter(BP %in% "ND", trainSetBP %in% "NUR", trait %in% "VSK") |> 
+    mutate(scenario="NUR-ALL"),
+  bind_rows(all.pred$nursBP) |> 
+    filter(validSetBP %in% "ND", trait %in% "VSK") |> 
+    mutate(scenario="NUR-BP")
+  )  |> 
+  filter(!is.na(obs))
+table(nd$scenario) ## should be same
+
+nd.pred.wide <- nd |> 
+  select(GID, trait, obs, pred, scenario) |> 
+  tidyr::pivot_wider(id_cols=c("GID","trait","obs"), names_from=scenario, values_from=pred)
+
+```
+
+## Plot
+
+```{r}
+ggplot(nd, aes(x=obs, y=pred, color=scenario))+
+  geom_point(size=0.8, alpha=0.5)+
+  geom_abline(slope=1, intercept=0, color="grey80", linewidth=0.5)+
+  theme_bigstatsr(size.rel=0.8)+
+  labs(x="Observed values", y="Predicted values")+
+  geom_smooth(method="lm", se=FALSE, linewidth=0.5)+
+  stat_cor(method="pearson", size=3, aes(label=after_stat(r.label)))+
+  theme(panel.grid=element_blank())
+ggsave(here("output","figures","GP-obs-vs-pred_ND-NUR-ALL_vs_NUR-BP.png"),width=7,height=5,scale=0.85)
+
+ggplot(nd.pred.wide, aes(x=`NUR-ALL`, y=`NUR-BP`))+
+  geom_point(size=0.8, alpha=0.5)+
+  geom_abline(slope=1, intercept=0, color="grey80", linewidth=0.5)+
+  theme_bigstatsr(size.rel=0.8)+
+  geom_smooth(method="lm", se=FALSE, linewidth=0.5)+
+  stat_cor(method="pearson", size=3, aes(label=after_stat(r.label)))+
+  theme(panel.grid=element_blank())
+```
+
+
+
+
+
+
+
 # Appendix
 
 ```{r info}

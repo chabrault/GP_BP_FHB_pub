@@ -116,6 +116,8 @@ write(p2d.temp,stderr())
 ## list of possible GP method       
 method <- meth<- c("GBLUP")#"RKHS",
 suf <- ""
+resamp.nreps <- 20
+frac.resamp <- 0.9
 ```
 
 
@@ -176,11 +178,97 @@ round(tapply(gp.wBP$corP, gp.wBP$trait, mean, na.rm=T),3)
 round(tapply(gp.wBP$corP, gp.wBP$trainSetBP, mean, na.rm=T),3)
 gp.wBP$scenario <- "wBP"
 
-
+## report CI
 gp.wBP <- gp.wBP |> 
   group_by(trait, GP.method, scenario, trainSetBP, validSetBP) |> 
-  summarize(across(where(is.numeric), mean),.groups="drop") |> 
-  dplyr::select(-rep)
+  summarize(sd=sd(corP), corP=mean(corP), nb.genos.TS=mean(nb.genos.TS),
+            nb.genos.VS=mean(nb.genos.VS),.groups="drop") |> 
+  #summarize(across(where(is.numeric), mean),.groups="drop") |> 
+  #dplyr::select(-rep) |> 
+  mutate(CI=1.96*sd/sqrt(nreps))
+
+
+# gp.wBP <- gp.wBP |> group_by(trait, GP.method, scenario,BP) |> 
+#   summarize(corP=mean(corP, na.rm=T))
+```
+
+
+
+
+## wBP small TSscenario
+
+wBP: within each BP for ND, SD, MN, with a training set size corresponding to MT.
+```{r apply_gp_all_wBP_smallTS}
+rerun=FALSE ## set to FALSE to avoid rerunning genomic prediction
+
+p2f.resamp <- here("output","genom_pred",
+                   paste0("GP_",meth,"_results_intraCV-smallTS",suf,".tsv"))
+if(!file.exists(p2f.resamp) | rerun){
+  gp.wBP.resamp <- data.frame()
+  stats <- list()
+  for(bp in BPs[!BPs %in% c("NUR","MT")]){
+    cat(paste(bp,"\n"))
+    for(meth in method){
+      
+      # p2f.stats <- here("output","genom_pred",
+      #                   paste0(bp,"_GP_",meth,"_results_intraCV-smallTS",suf,".tsv"))
+      #if(!file.exists(p2f.stats) |rerun){
+      #write(paste(meth,"\n"),stderr())
+      gid.bp <- pheno$GID[pheno$BP %in% bp]
+      genoBP <- geno.sc[gid.bp,]
+      phenoBP <- pheno[match(gid.bp,pheno$GID),]
+      ## select the set of traits with more than 50 observations
+      traits.50obs <- traits[which(colSums(!is.na(phenoBP[,traits])) > 50)]
+      
+      ## take a smaller sample of individuals in the training set
+      for(i in 1:resamp.nreps){
+        print(paste("resampling",i,"/",resamp.nreps,"\n"),stderr())
+        set.seed(411+i)
+        gp.stats <- data.frame()
+        for(tr in traits.50obs){
+          pheno.noNA <- phenoBP[!is.na(phenoBP[[tr]]),]
+          gid.noNA <- unique(pheno.noNA$GID)
+          MT_size <- nrow(pheno[!is.na(pheno[[tr]]) & pheno$BP %in% "MT",])
+          sample.gid <- sample(gid.noNA, size = min(length(gid.noNA),MT_size))
+          gp.stats <-  bind_rows(gp.stats,
+                                 compute_GP_methods(geno=genoBP[sample.gid,], 
+                                                    pheno=phenoBP[match(sample.gid, phenoBP$GID),],
+                                                    traits=tr, 
+                                                    GP.method=meth,
+                                                    nreps=20, nfolds=nfolds, 
+                                                    nb.cores=nb.cores)$gp.stats
+          )
+        }
+        stats[[bp]][[i]] <- gp.stats
+      }
+      ## aggregate stats
+      stats[[bp]] <- bind_rows(stats[[bp]], .id="resampID")
+    }
+  }
+  
+  gp.wBP.resamp <- bind_rows(stats, .id="trainSetBP")
+  write.table(gp.wBP.resamp, file=p2f.resamp)
+} else {
+  gp.wBP.resamp <- fread(p2f.resamp, data.table=FALSE)
+}
+
+## aggregate the results, average over the rep
+#ap(gp.wBP)
+round(tapply(gp.wBP.resamp$corP, gp.wBP.resamp$trait, mean, na.rm=T),3)
+round(tapply(gp.wBP.resamp$corP, gp.wBP.resamp$trainSetBP, mean, na.rm=T),3)
+gp.wBP.resamp$scenario <- "wBP.resamp"
+
+gp.wBP.resamp <- gp.wBP.resamp |>
+  mutate(validSetBP=trainSetBP) |> 
+  group_by(trait, GP.method, scenario, trainSetBP, validSetBP, rep) |>
+  summarize(corP=mean(corP), nb.genos.TS=mean(nb.genos.TS),
+            nb.genos.VS=mean(nb.genos.VS),.groups="drop") |>
+  group_by(trait, GP.method, scenario, trainSetBP, validSetBP) |>
+  summarize(sd=sd(corP), corP=mean(corP), nb.genos.TS=mean(nb.genos.TS),
+            nb.genos.VS=mean(nb.genos.VS),.groups="drop") |>
+  #summarize(across(where(is.numeric), mean),.groups="drop") |>
+  #dplyr::select(-rep) |>
+  mutate(CI=1.96*sd/sqrt(nreps))
 
 
 # gp.wBP <- gp.wBP |> group_by(trait, GP.method, scenario,BP) |> 
@@ -648,12 +736,204 @@ gp.nursBP$scenario <- "nursBP"
 
 
 
+# Calculate predictive ability with resampling
+
+Using obs/pred values, estimate CI around pearson correlation stability by considering a sample of the validation set.
+
+## Load obs/pred values for each scenario
+
+```{r}
+sce.abb <- c("acBP","acBP-sinceDate",
+             "acAllBP","nursBP")
+p2fs <- here("output","genom_pred",
+             c(paste0("observed-vs-predicted_acBP_",meth,".rds"),
+               paste0("observed-vs-predicted_acBP-since",dates[length(dates)],"_",meth,".rds"),
+               paste0("observed-vs-predicted_acAllBP_",meth,".rds"),
+               paste0("observed-vs-predicted_nursBP_",meth,".rds")
+             ))
+
+res.op <- map(p2fs, readRDS)
+names(res.op) <- sce.abb
+## add acBP.nur obs pred
+nur <- c("URN","URSN")
+p2fs <- here("output","genom_pred",paste0("observed-vs-predicted_acBP-",
+                                             nur,"_",meth,".rds"))
+acNUR <- map_dfr(p2fs, readRDS) 
+acNUR <- do.call(rbind, acNUR)
+res.op$`acBP-nur` <- acNUR
+res.op <- map(res.op, bind_rows)# |> bind_rows(.id="scenario")
+```
+
+
+## Format
+
+```{r}
+res.op$acBP <- rename(res.op$acBP, validSetBP=BP)
+res.op$acAllBP <- res.op$acAllBP |> mutate(trainSet="allOtherBP")
+res.op$nursBP <- res.op$nursBP |> mutate(trainSet="NUR-BP")
+res.op$`acBP-sinceDate` <- rename(res.op$`acBP-sinceDate`, validSetBP=BP)
+res.op$`acBP-nur` <- rename(res.op$`acBP-nur`, validSetBP=BP)
+```
+
+## Calculate SE with resampling for each scenario
+
+### acBP
+
+```{r}
+d <- res.op$acBP
+CI.bp <- data.frame()
+for(trbp in unique(d$trainSetBP)){
+  for(valbp in unique(d$validSetBP)){
+    subset <- d |> filter(validSetBP %in% valbp, trainSetBP %in% trbp)
+    ## check with the full dataset
+    #subset |> group_by(trait) |> summarize(corP=cor(obs,pred, use="pairwise.complete.obs"))
+    gids <- unique(subset$GID)
+    if(length(gids) > 0){
+      res.resamp <- map_dfr(1:resamp.nreps, \(x){
+        set.seed(411+x)
+        samp.gid <- sample(gids, size=round(frac.resamp*length(gids)))
+        subset |> filter(GID %in% samp.gid) |> 
+          group_by(trait) |> summarize(corP=cor(obs,pred, use="pairwise.complete.obs")) |>
+          mutate(rep=x)
+      })
+      ## compute 95% CI
+      CI.bp <- bind_rows(CI.bp, res.resamp |> group_by(trait) |> 
+                           summarize(sd=sd(corP)) |> 
+                           mutate(CI=1.96*sd/sqrt(resamp.nreps),
+                                  trainSetBP=trbp, validSetBP=valbp))
+    }
+  }
+}
+## add this value to the PA obtained in the whole valid set
+gp.acBP <- left_join(gp.acBP,CI.bp, by=c("trait","trainSetBP","validSetBP"))
+```
+
+## acBP NUR
+
+```{r}
+d <- res.op$`acBP-nur`
+CI.bp <- data.frame()
+for(trbp in unique(d$trainSetBP)){
+  for(valbp in unique(d$validSetBP)){
+    subset <- d |> filter(validSetBP %in% valbp, trainSetBP %in% trbp)
+    ## check with the full dataset
+    #subset |> group_by(trait) |> summarize(corP=cor(obs,pred, use="pairwise.complete.obs"))
+    gids <- unique(subset$GID)
+    if(length(gids) > 0){
+      res.resamp <- map_dfr(1:resamp.nreps, \(x){
+        set.seed(411+x)
+        samp.gid <- sample(gids, size=round(frac.resamp*length(gids)))
+        subset |> filter(GID %in% samp.gid) |> 
+          group_by(trait) |> summarize(corP=cor(obs,pred, use="pairwise.complete.obs")) |>
+          mutate(rep=x)
+      })
+      ## compute 95% CI
+      CI.bp <- bind_rows(CI.bp, res.resamp |> group_by(trait) |> 
+                           summarize(sd=sd(corP)) |> 
+                           mutate(CI=1.96*sd/sqrt(resamp.nreps),
+                                  trainSetBP=trbp, validSetBP=valbp))
+    }
+  }
+}
+## add this value to the PA obtained in the whole valid set
+gp.acBP.nur <- left_join(gp.acBP.nur,CI.bp, by=c("trait","trainSetBP","validSetBP"))
+```
+
+
+### AcAllBP
+
+```{r}
+d <- res.op$acAllBP
+CI.bp <- data.frame()
+
+for(bp in unique(d$validSetBP)){
+  subset <- d |> filter(validSetBP %in% bp)
+  ## check with the full dataset
+  #subset |> group_by(trait) |> summarize(corP=cor(obs,pred, use="pairwise.complete.obs"))
+  gids <- unique(subset$GID)
+  res.resamp <- map_dfr(1:resamp.nreps, \(x){
+    set.seed(411+x)
+    samp.gid <- sample(gids, size=round(frac.resamp*length(gids)))
+    subset |> filter(GID %in% samp.gid) |> 
+      group_by(trait) |> summarize(corP=cor(obs,pred, use="pairwise.complete.obs")) |>
+      mutate(rep=x)
+  })
+  ## compute 95% CI
+  CI.bp <- bind_rows(CI.bp, res.resamp |> group_by(trait) |> 
+                       summarize(sd=sd(corP)) |> 
+                       mutate(CI=1.96*sd/sqrt(resamp.nreps),validSetBP=bp))
+}
+## add this value to the PA obtained in the whole valid set
+gp.acAllBP <- left_join(gp.acAllBP,
+                        CI.bp, by=c("trait","validSetBP"))
+```
+
+### nursBP
+
+```{r}
+d <- res.op$nursBP
+CI.bp <- data.frame()
+
+for(bp in unique(d$validSetBP)){
+  subset <- d |> filter(validSetBP %in% bp)
+  ## check with the full dataset
+  #subset |> group_by(trait) |> summarize(corP=cor(obs,pred, use="pairwise.complete.obs"))
+  gids <- unique(subset$GID)
+  res.resamp <- map_dfr(1:resamp.nreps, \(x){
+    set.seed(411+x)
+    samp.gid <- sample(gids, size=round(frac.resamp*length(gids)))
+    subset |> filter(GID %in% samp.gid) |> 
+      group_by(trait) |> summarize(corP=cor(obs,pred, use="pairwise.complete.obs")) |>
+      mutate(rep=x)
+  })
+  ## compute 95% CI
+  CI.bp <- bind_rows(CI.bp, res.resamp |> group_by(trait) |> 
+                       summarize(sd=sd(corP)) |> 
+                       mutate(CI=1.96*sd/sqrt(resamp.nreps),validSetBP=bp))
+}
+## add this value to the PA obtained in the whole valid set
+gp.nursBP <- left_join(gp.nursBP,CI.bp, by=c("trait","validSetBP"))
+```
+
+### ac BP specific date
+
+```{r}
+d <- res.op$`acBP-sinceDate`
+CI.bp <- data.frame()
+for(trbp in unique(d$trainSetBP)){
+  for(valbp in unique(d$validSetBP)){
+    subset <- d |> filter(validSetBP %in% valbp, trainSetBP %in% trbp)
+    ## check with the full dataset
+    #subset |> group_by(trait) |> summarize(corP=cor(obs,pred, use="pairwise.complete.obs"))
+    gids <- unique(subset$GID)
+    if(length(gids) > 0){
+      res.resamp <- map_dfr(1:resamp.nreps, \(x){
+        set.seed(411+x)
+        samp.gid <- sample(gids, size=round(frac.resamp*length(gids)))
+        subset |> filter(GID %in% samp.gid) |> 
+          group_by(trait) |> summarize(corP=cor(obs,pred, use="pairwise.complete.obs")) |>
+          mutate(rep=x)
+      })
+      ## compute 95% CI
+      CI.bp <- bind_rows(CI.bp, res.resamp |> group_by(trait) |> 
+                           summarize(sd=sd(corP)) |> 
+                           mutate(CI=1.96*sd/sqrt(resamp.nreps),
+                                  trainSetBP=trbp, validSetBP=valbp))
+    }
+  }
+}
+## add this value to the PA obtained in the whole valid set
+gp.acBP.date <- left_join(gp.acBP.date,CI.bp, by=c("trait","trainSetBP","validSetBP"))
+```
+
+
 
 
 # Combine results
 
 ```{r}
 all.res.list <- list(gp.wBP
+                     ,gp.wBP.resamp
                      ,gp.acBP
                      ,gp.acBP.date
                      ,gp.acBP.nur

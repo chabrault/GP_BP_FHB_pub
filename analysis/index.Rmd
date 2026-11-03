@@ -39,8 +39,8 @@ knitr::include_graphics("../output/figures/GP-heatmap_3-scenarios-corP.png", err
 ```
 
 
-
 - [Compare observed vs. predicted values](analyze_GP_obs_pred.html). In this script, we compare observed vs. predicted values for each genomic prediction scenario to get more insights about the predicted values.
 
+- [Accuracy of selection from predictive ability and culling fraction](pred-ability_response_culling.html). In this script, we simulate two correlated variables for a range of predictive ability and culling fraction and we estimate the true positive rate.
 
 

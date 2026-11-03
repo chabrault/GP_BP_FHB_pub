@@ -1,0 +1,201 @@
+---
+title: "Format inputs for FHB GP manuscript"
+author: Charlotte Brault
+output: html_document
+date: '`r format(Sys.time(), "%d %B, %Y")`'
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Libraries
+
+```{r load libraries}
+suppressPackageStartupMessages(library(here)) # root directory
+suppressPackageStartupMessages(library(data.table)) # load data
+suppressPackageStartupMessages(library(apercu)) # ap
+suppressPackageStartupMessages(library(dplyr)) # formatting
+suppressPackageStartupMessages(library(ggplot2)) # plot
+suppressPackageStartupMessages(library(janitor)) # formatting
+suppressPackageStartupMessages(library(purrr)) # handle lists
+suppressPackageStartupMessages(library(paletteer)) # color palette
+suppressPackageStartupMessages(library(bigstatsr)) # theme
+suppressPackageStartupMessages(library(MASS)) # multiv
+```
+
+
+# Set up root directory
+
+```{r current dir}
+here::i_am("analysis/pred-ability_response-selection_culling.Rmd")
+```
+
+
+This R chunk is used to assess how much time it takes to execute the R code in this document until the end:
+
+```{r time_0}
+t0 <- proc.time()
+```
+
+# Data simulation
+
+## Parameters
+
+```{r}
+popSize <- 1000
+df.params <- expand.grid(cull_frc=seq(0,1,0.01),
+                         PA=seq(0,1,0.05), 
+                         rep=seq(1,100),
+                         accuracy_sel=NA,TPR=NA, TNR=NA)
+```
+
+- `cull_frc` corresponds to the fraction of the population selected (top values first).
+
+- `PA` corresponds to the predictive ability (pearson correlation)
+
+- `accuracy_sel` corresponds to the accuracy of selection (percentage of the population rightfully selected or discarded).
+
+## Simulate two variables and make selection
+
+One is observed and one is predicted, do it in such way that the correlation between the two is corresponding to the predictive ability
+
+```{r}
+mu <- c(0, 0)
+for(r in unique(df.params$rep)){
+  set.seed(56+r)
+  for(pa in unique(df.params$PA)){
+    Sigma <- matrix(c(1.0, pa,pa, 1.0), nrow = 2)
+    sim <- mvrnorm(n = popSize, mu = mu, Sigma = Sigma)
+    for(cull in unique(df.params$cull_frc)){
+      ## all inds above the threshold are selected
+      data <- as.data.frame(sim)
+      data$obsFac <- ifelse(sim[,1] >= quantile(sim[,1], probs = cull), "sel","non-sel")
+      data$predFac <- ifelse(sim[,2] >= quantile(sim[,2], probs = cull), "sel","non-sel")
+      acc <- nrow(data[data$obsFac == data$predFac,])/popSize
+      tpr <-  nrow(data[data$obsFac == "sel" & data$predFac == "sel",])/nrow(data[data$obsFac == "sel",])
+      tnr <-  nrow(data[data$obsFac == "non-sel" & data$predFac == "non-sel",])/nrow(data[data$obsFac == "non-sel",])
+      # confMat <- caret::confusionMatrix(data=factor(data$predFac, c("sel","non-sel")),
+      #                                   reference=factor(data$obsFac, c("sel","non-sel")))
+      ## add the value in the table
+      idx <- which(df.params$PA == pa & df.params$cull_frc == cull & df.params$rep == r)
+      df.params$accuracy_sel[idx] <- acc
+      df.params$TPR[idx] <- tpr
+      df.params$TNR[idx] <- tnr
+    }
+  }
+}
+saveRDS(df.params, here("output","simul_pred-ability_response_culling.rds"))
+
+df.params.avg <- df.params |> 
+  group_by(PA, cull_frc) |> 
+  summarize(accuracy_sel=mean(accuracy_sel),
+            TPR=mean(TPR), TNR=mean(TNR),.groups="drop")
+```
+
+## Plot results
+
+```{r}
+cor(df.params.avg$accuracy_sel, df.params.avg$TPR)
+
+
+ggplot(df.params.avg, aes(x=cull_frc, y=accuracy_sel, color=PA, group=PA))+
+  geom_point() + geom_line()+
+  scale_color_viridis_c()+
+  theme_bigstatsr(size.rel=0.8)+
+  scale_x_continuous(labels = scales::label_percent())+
+  #scale_y_continuous(labels = scales::label_percent())+
+  labs(x="Selected percentage", y="Accuracy \n(correctly selected and discarded)",
+       color="Predictive ability")+
+  guides(color=guide_colourbar(theme = theme(
+    legend.key.width  = unit(15, "lines"),
+    legend.key.height = unit(1, "lines"))))+
+  theme(legend.position="bottom",
+        legend.title.position = "top",
+        legend.title=element_text(hjust=0.5))
+ggsave(here("output","figures","simulation_accuracy-selection_PA_culling.png"),
+       width=6, height=5)
+
+
+```
+
+
+```{r}
+ggplot(df.params.avg, aes(x=cull_frc, y=TPR, color=PA, group=PA))+
+  geom_point() + geom_line()+
+  scale_color_viridis_c()+
+  theme_bigstatsr(size.rel=0.8)+
+  scale_x_continuous(labels = scales::label_percent())+
+  #scale_y_continuous(labels = scales::label_percent())+
+  labs(x="Selected percentage", y="True Positive Rate",
+       color="Predictive ability")+
+  guides(color=guide_colourbar(theme = theme(
+    legend.key.width  = unit(15, "lines"),
+    legend.key.height = unit(1, "lines"))))+
+  theme(legend.position="bottom",
+        legend.title.position = "top",
+        legend.title=element_text(hjust=0.5))
+ggsave(here("output","figures","simulation_TPR-selection_PA_culling.png"),
+       width=6, height=5)
+
+## other representation
+ggplot(df.params.avg, aes(x=cull_frc, y=PA, fill=TPR))+
+  geom_tile()+
+  scale_fill_viridis_c()+
+  theme_bigstatsr(size.rel=0.8)+
+  scale_x_continuous(labels = scales::label_percent())+
+  labs(x="Selected percentage", y="Predictive ability",
+       fill="True Positive Rate")+
+  guides(fill=guide_colourbar(theme = theme(
+    legend.key.width  = unit(15, "lines"),
+    legend.key.height = unit(1, "lines"))))+
+  theme(legend.position="bottom",
+        legend.title.position = "top",
+        legend.title=element_text(hjust=0.5))
+ggsave(here("output","figures","simulation_TPR-selection_PA_culling_v2.png"),
+       width=6, height=5)
+```
+
+
+```{r}
+ggplot(df.params.avg, aes(x=cull_frc, y=TNR, color=PA, group=PA))+
+  geom_point() + geom_line()+
+  scale_color_viridis_c()+
+  theme_bigstatsr(size.rel=0.8)+
+  scale_x_continuous(labels = scales::label_percent())+
+  #scale_y_continuous(labels = scales::label_percent())+
+  labs(x="Selected percentage", y="True Positive Rate",
+       color="Predictive ability")+
+  guides(color=guide_colourbar(theme = theme(
+    legend.key.width  = unit(15, "lines"),
+    legend.key.height = unit(1, "lines"))))+
+  theme(legend.position="bottom",
+        legend.title.position = "top",
+        legend.title=element_text(hjust=0.5))
+ggsave(here("output","figures","simulation_TNR-selection_PA_culling.png"),
+       width=6, height=5)
+```
+
+
+
+Explore values at a given PA and culling threshold
+
+```{r}
+df.params.avg |> filter(PA > 0.15 & PA < 0.3, 
+                        cull_frc > 0.25 & cull_frc < 0.75)
+
+df.params.avg |> filter(PA >= 0.15 & PA < 0.2, cull_frc==0.6) |> DT::datatable()
+```
+
+
+PA	cull_frc	accuracy_sel	TPR	TNR
+0.15	0.6	0.565	0.4567	0.6379
+
+
+# Appendix
+
+```{r info}
+t1 <- proc.time(); t1 - t0
+print(sessionInfo(), locale=FALSE)
+```
+
